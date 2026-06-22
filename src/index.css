@@ -1,0 +1,99 @@
+@import 'tailwindcss';
+@import 'tailwindcss';
+
+/* 启用 class-based 暗色模式 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary: #4a90d9;
+  --color-primary-container: #2b78bf;
+  --color-secondary: #266d00;
+  --color-background: #f9f9f9;
+  --color-surface: #f9f9f9;
+  --color-surface-white: #ffffff;
+  --color-on-surface: #1a1c1c;
+  --color-on-surface-variant: #414751;
+  --color-outline: #717782;
+  --color-outline-variant: #c1c7d2;
+  --color-inactive-grey: #999999;
+
+  --color-course-red: #f5222d;
+  --color-course-green: #52c41a;
+  --color-course-brown: #873800;
+  --color-course-grey: #8c8c8c;
+  --color-course-orange: #fa8c16;
+  --color-course-blue: #4a90d9;
+  --color-course-purple: #722ed1;
+  --color-course-yellow: #fadb14;
+
+  --font-sans: 'Inter', 'Hanken Grotesk', system-ui, sans-serif;
+  --font-headline: 'Hanken Grotesk', system-ui, sans-serif;
+}
+
+/* 设计体系:
+   字号: text-[10px]/[11px]=标签, text-xs(12px)=辅助, text-sm(14px)=正文, text-base(16px)=标题
+   间距: p-1(4px) p-2(8px) p-3(12px) p-4(16px) p-6(24px)
+   圆角: rounded-lg(8px) rounded-xl(12px) rounded-2xl(16px)
+*/
+
+/* 暗色模式 */
+@layer base {
+  .dark {
+    --color-background: #0f172a;
+    --color-surface: #1e293b;
+    --color-surface-white: #1e293b;
+    --color-on-surface: #f1f5f9;
+    --color-on-surface-variant: #94a3b8;
+    --color-outline: #475569;
+    --color-outline-variant: #334155;
+    --color-inactive-grey: #64748b;
+    --color-white: #1e293b;
+    --color-slate-50: #1e293b;
+    --color-slate-100: #334155;
+    --color-gray-50: #1e293b;
+    --color-gray-100: #334155;
+    --color-gray-200: #475569;
+    --color-gray-400: #94a3b8;
+    --color-gray-500: #cbd5e1;
+    --color-red-50: #1e293b;
+    --color-black: #f1f5f9;
+  }
+}
+
+html {
+  text-size-adjust: 100%;
+}
+
+@layer utilities {
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

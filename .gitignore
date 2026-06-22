@@ -1,0 +1,17 @@
+node_modules/
+dist/
+uploads/
+.DS_Store
+Thumbs.db
+*.tmp
+screenshots/
+.env
+logs/
+*.log
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+metadata.json
+

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CampusLink 管理后台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f1f5f9;color:#1e293b}
+.hidden{display:none!important}
+.login{max-width:360px;margin:120px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.06)}
+.login h1{font-size:20px;margin-bottom:4px}
+.login p{font-size:13px;color:#94a3b8;margin-bottom:16px}
+.login input{width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:10px;font-size:14px;outline:none;margin-bottom:10px}
+.login input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.login button{width:100%;padding:10px;background:#6366f1;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer}
+.login button:hover{background:#4f46e5}
+.login .error{font-size:12px;color:#ef4444;margin-top:6px}
+.app{max-width:960px;margin:0 auto;padding:16px}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.topbar h1{font-size:18px}
+.topbar .info{font-size:11px;color:#94a3b8}
+.topbar button{font-size:11px;padding:5px 12px;background:#e2e8f0;border:none;border-radius:8px;cursor:pointer}
+.stats{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.stats .stat{background:#fff;border-radius:10px;padding:10px 16px;text-align:center;min-width:80px}
+.stats .stat .num{font-size:20px;font-weight:700}
+.stats .stat .lbl{font-size:10px;color:#94a3b8;margin-top:2px}
+.tabs{display:flex;gap:2px;margin-bottom:12px;background:#e2e8f0;border-radius:10px;padding:3px;overflow-x:auto;flex-wrap:wrap}
+.tabs button{padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:transparent;color:#64748b;white-space:nowrap}
+.tabs button.active{background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tabs button .badge{margin-left:4px;font-size:10px;padding:1px 6px;border-radius:999px;background:#f59e0b;color:#fff}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;font-size:12px}
+th{background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;font-size:11px;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid #f1f5f9}
+tr:hover{background:#f8fafc}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:999px}
+.tag.verified,.tag.active{background:#dcfce7;color:#16a34a}
+.tag.pending{background:#fef3c7;color:#d97706}
+.tag.rejected,.tag.closed{background:#fee2e2;color:#dc2626}
+.tag.sold{background:#e0e7ff;color:#4338ca}
+.btn-sm{font-size:10px;padding:3px 10px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin:1px}
+.btn-ok{background:#16a34a;color:#fff}.btn-ok:hover{background:#15803d}
+.btn-no{background:#dc2626;color:#fff}.btn-no:hover{background:#b91c1c}
+.enc{color:#8b5cf6;font-size:10px;cursor:help}
+.enc:hover{color:#7c3aed}
+.empty{text-align:center;color:#94a3b8;padding:40px 0;font-size:13px}
+.filter{display:flex;gap:6px;margin-bottom:10px}
+.filter button{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer}
+.filter button.on{background:#1e293b;color:#fff;border-color:#1e293b}
+.card{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;display:block}
+.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);padding:10px 20px;background:#1e293b;color:#fff;border-radius:10px;font-size:13px;z-index:999;animation:toastFade 2.5s forwards}
+@keyframes toastFade{0%,80%{opacity:1}100%{opacity:0}}
+</style>
+</head>
+<body>
+
+<div id="login" class="login">
+  <h1>CampusLink 管理后台</h1>
+  <p>管理员密钥</p>
+  <input type="password" id="keyInput" placeholder="输入密钥" autofocus onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">进入</button>
+  <div id="loginError" class="error"></div>
+</div>
+
+<div id="app" class="app hidden">
+  <div class="topbar">
+    <div><h1>管理后台</h1><div class="info" id="statsRow"></div></div>
+    <button onclick="logout()">退出</button>
+  </div>
+  <div class="stats" id="statsCards"></div>
+  <div class="tabs" id="tabBar"></div>
+  <div id="panel"></div>
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<script>
+const API = '/campus/api/admin';
+let KEY = '';
+
+// ── 工具 ──
+function tid(){return'tr-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}
+function api(path,opts={}){
+  const h={'x-trace-id':tid(),Authorization:'Bearer '+KEY};
+  if(opts.body)h['Content-Type']='application/json';
+  return fetch(API+path,{...opts,headers:{...h,...(opts.headers||{})},body:opts.body||undefined}).catch(e=>({ok:false,status:0}));
+}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2500)}
+function enc(s){return s&&s.length>20?'<span class="enc" title="已解密: '+esc(s)+'">'+esc(s.slice(0,8)+'...')+'</span>':esc(s||'-')}
+
+// ── 自动登录 ──
+(function(){
+  const k = sessionStorage.getItem('admin_key');
+  if(k){KEY=k;document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');load();}
+})();
+
+function login(){
+  KEY=document.getElementById('keyInput').value.trim();
+  if(!KEY)return;
+  api('/stats').then(r=>{
+    if(r.ok){sessionStorage.setItem('admin_key',KEY);document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');load()}
+    else{document.getElementById('loginError').textContent='密钥错误'}
+  }).catch(()=>{document.getElementById('loginError').textContent='密钥错误'});
+}
+function logout(){sessionStorage.removeItem('admin_key');KEY='';document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden')}
+
+// ── 加载 ──
+const TABS=['overview','posts','users','courses','registrations','favorites','tokens'];
+const TAB_LABELS={overview:'总览',posts:'帖子',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌'};
+let curTab='overview';
+
+function load(){
+  api('/stats').then(r=>r.json()).then(d=>{
+    if(d.code!==0)return;
+    document.getElementById('statsCards').innerHTML=`
+      <div class="stat"><div class="num">${d.data.users}</div><div class="lbl">用户</div></div>
+      <div class="stat"><div class="num">${d.data.posts}</div><div class="lbl">帖子</div></div>
+      <div class="stat"><div class="num">${d.data.registrations}</div><div class="lbl">报名</div></div>
+      <div class="stat"><div class="num" style="color:${d.data.pendingUsers>0?'#f59e0b':'#16a34a'}">${d.data.pendingUsers}</div><div class="lbl">待审核</div></div>`;
+    document.getElementById('statsRow').textContent='数据实时同步';
+  });
+  let tb='';TABS.forEach(t=>{tb+=`<button id="tab_${t}" class="${t===curTab?'active':''}" onclick="switchTab('${t}')">${TAB_LABELS[t]}</button>`});
+  document.getElementById('tabBar').innerHTML=tb;
+  switchTab(curTab);
+}
+
+function switchTab(tab){
+  curTab=tab;
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab_'+tab).classList.add('active');
+  if(tab==='overview')showOverview();
+  if(tab==='posts')fetchPosts();
+  if(tab==='users')fetchUsers();
+  if(tab==='courses')fetchCourses();
+  if(tab==='registrations')fetchRegs();
+  if(tab==='favorites')fetchFavs();
+  if(tab==='tokens')fetchTokens();
+}
+
+// ── 总览 ──
+function showOverview(){
+  Promise.all([api('/posts?limit=5'),api('/users?limit=5'),api('/registrations?limit=5')]).then(async rs=>{
+    const [pr,ur,rr]=await Promise.all(rs.map(r=>r.json()));
+    let h='<h4 style="margin:12px 0 6px">最近帖子</h4>';
+    if(pr.data?.list?.length)pr.data.list.forEach(p=>{h+=`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(p.title)} <span class="tag ${p.status||''}">${p.status||''}</span> <span style="color:#94a3b8">${esc(p.publisher_name||'')}</span></div>`});
+    else h+='<div class="empty">暂无</div>';
+    h+='<h4 style="margin:12px 0 6px">最近注册</h4>';
+    if(ur.data?.length)ur.data.forEach(u=>{h+=`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(u.nickname)} (${esc(u.student_id)}) <span class="tag ${u.auth_status||''}">${u.auth_status||''}</span></div>`});
+    else h+='<div class="empty">暂无</div>';
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 帖子 ──
+let postFilter='';
+function fetchPosts(){
+  api('/posts?limit=100'+(postFilter?'&status='+postFilter:'')).then(r=>r.json()).then(d=>{
+    const list=d.data?.list||[];
+    let h=`<div class="filter">${['','active','pending','rejected','closed'].map(s=>`<button class="${postFilter===s?'on':''}" onclick="postFilter='${s}';fetchPosts()">${s||'全部'}</button>`).join('')}</div>`;
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+=`<table><tr><th>ID</th><th>标题</th><th>发布者</th><th>类型</th><th>状态</th><th>联系方式</th><th>时间</th><th>操作</th></tr>`;
+      list.forEach(p=>{h+=`<tr><td>${p.id}</td><td><span class="card" title="${esc(p.title)}">${esc(p.title)}</span></td><td>${esc(p.publisher_name||'')}</td><td>${esc(p.post_type)}</td><td><span class="tag ${p.status}">${p.status}</span></td><td>${enc(p.contact_info)}</td><td>${(p.created_at||'').slice(0,10)}</td><td>${p.status==='pending'?`<button class="btn-sm btn-ok" onclick="act('posts/${p.id}',{status:'active'})">通过</button><button class="btn-sm btn-no" onclick="act('posts/${p.id}',{status:'rejected'})">打回</button>`:p.status==='active'?`<button class="btn-sm btn-no" onclick="act('posts/${p.id}',{status:'closed'})">下架</button>`:'<button class="btn-sm btn-ok" onclick="act(\'posts/'+p.id+'\',{status:\'active\'})">恢复</button>'}</td></tr>`});
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 用户 ──
+let userFilter='all';
+function fetchUsers(){
+  api('/users'+(userFilter!=='all'?'?status='+userFilter:'')).then(r=>r.json()).then(d=>{
+    const list=d.data||[];
+    let h=`<div class="filter">${['all','pending','verified'].map(s=>`<button class="${userFilter===s?'on':''}" onclick="userFilter='${s}';fetchUsers()">${s==='all'?'全部':s==='pending'?'待审核':'已通过'}</button>`).join('')}</div>`;
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+=`<table><tr><th>ID</th><th>姓名</th><th>学号</th><th>状态</th><th>管理员</th><th>注册时间</th><th>操作</th></tr>`;
+      list.forEach(u=>{h+=`<tr><td>${u.id}</td><td>${esc(u.nickname)}</td><td>${esc(u.student_id)}</td><td><span class="tag ${u.auth_status}">${u.auth_status}</span></td><td>${u.is_admin?'✅':''}</td><td>${(u.created_at||'').slice(0,10)}</td><td>${u.auth_status==='pending'?`<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">通过</button><button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'rejected'})">拒绝</button>`:u.auth_status==='verified'?`<button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'pending'})">撤销</button>`:`<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">恢复</button>`}</td></tr>`});
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 课表 ──
+function fetchCourses(){
+  api('/courses?limit=100').then(r=>r.json()).then(d=>{
+    const list=d.data?.list||[];
+    if(!list.length){document.getElementById('panel').innerHTML='<div class="empty">暂无</div>';return}
+    let h=`<table><tr><th>ID</th><th>课程</th><th>教师</th><th>教室</th><th>周几</th><th>节次</th><th>学生</th></tr>`;
+    list.forEach(c=>{h+=`<tr><td>${c.id}</td><td>${esc(c.name)}</td><td>${esc(c.teacher)}</td><td>${esc(c.classroom)}</td><td>周${c.weekday}</td><td>${c.start_period}-${c.start_period+c.period_span-1}节</td><td>${esc(c.nickname||'')}</td></tr>`});
+    h+='</table>';
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 报名 ──
+function fetchRegs(){
+  api('/registrations?limit=100').then(r=>r.json()).then(d=>{
+    const list=d.data?.list||[];
+    if(!list.length){document.getElementById('panel').innerHTML='<div class="empty">暂无</div>';return}
+    let h=`<table><tr><th>ID</th><th>活动</th><th>报名者</th><th>学号</th><th>电话</th><th>院系</th><th>时间</th></tr>`;
+    list.forEach(r=>{h+=`<tr><td>${r.id}</td><td>${esc(r.listing_title)}</td><td>${esc(r.registrant_name)}</td><td>${enc(r.student_id)}</td><td>${enc(r.phone)}</td><td>${esc(r.department||'')}</td><td>${(r.created_at||'').slice(0,10)}</td></tr>`});
+    h+='</table>';
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 收藏 ──
+function fetchFavs(){
+  api('/favorites').then(r=>r.json()).then(d=>{
+    const list=d.data||[];
+    if(!list.length){document.getElementById('panel').innerHTML='<div class="empty">暂无</div>';return}
+    let h=`<table><tr><th>ID</th><th>用户</th><th>帖子</th><th>时间</th></tr>`;
+    list.forEach(f=>{h+=`<tr><td>${f.id}</td><td>${esc(f.nickname||'')}</td><td>${esc(f.post_title||f.post_id)}</td><td>${(f.created_at||'').slice(0,10)}</td></tr>`});
+    h+='</table>';
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 令牌 ──
+function fetchTokens(){
+  api('/tokens').then(r=>r.json()).then(d=>{
+    const list=d.data||[];
+    if(!list.length){document.getElementById('panel').innerHTML='<div class="empty">暂无</div>';return}
+    let h=`<table><tr><th>ID</th><th>用户</th><th>过期</th><th>创建</th></tr>`;
+    list.forEach(t=>{h+=`<tr><td>${t.id}</td><td>${esc(t.nickname||'')}</td><td>${(t.expires_at||'').slice(0,16)}</td><td>${(t.created_at||'').slice(0,16)}</td></tr>`});
+    h+='</table>';
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 通用操作 ──
+function act(path,body){
+  api('/'+path,{method:'PUT',body:JSON.stringify(body)}).then(r=>r.json()).then(d=>{toast(d.message||'已更新');switchTab(curTab)});
+}
+</script>
+</body>
+</html>
