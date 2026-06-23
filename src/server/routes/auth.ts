@@ -244,7 +244,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
     limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
     fileFilter: (_req, file, cb) => {
       const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']; if (allowed.includes(file.mimetype)) cb(null, true);
-      else cb(new Error('仅支持 JPG/PNG/WebP/GIF 格式'));
+      else cb(null, false);
     },
   });
 
@@ -277,7 +277,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
     limits: { fileSize: 4 * 1024 * 1024 }, // 封面允许 4MB
     fileFilter: (_req, file, cb) => {
       const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']; if (allowed.includes(file.mimetype)) cb(null, true);
-      else cb(new Error('仅支持 JPG/PNG/WebP/GIF 格式'));
+      else cb(null, false);
     },
   });
 
