@@ -229,12 +229,11 @@ export default function ListingDetail({
       </section>
 
       <section className="p-4 bg-white flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setShowProfile(true)}
-            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:bg-slate-50 active:bg-slate-100 rounded-xl p-1 -m-1 transition-colors text-left"
-          >
+        <div
+          className="flex items-center justify-between"
+          onClick={() => setShowProfile(true)}
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer touch-manipulation select-none">
             <img
               src={listing.publisherAvatar}
               alt={listing.publisherName}
@@ -254,7 +253,7 @@ export default function ListingDetail({
               <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
             </div>
             <Icon name="chevron_right" className="text-gray-300 text-sm shrink-0" />
-          </button>
+          </div>
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
           <div className="flex gap-2">
