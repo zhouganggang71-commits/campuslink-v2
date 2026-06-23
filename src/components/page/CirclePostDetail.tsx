@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense, useRef } from 'react';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
 import { api, getToken } from '../../utils/api';
@@ -11,6 +11,7 @@ interface CommentItem {
   post_id: number;
   parent_id: number | null;
   content: string;
+  image_url?: string | null;
   created_at: string;
   nickname: string;
   auth_status: string;
@@ -44,6 +45,9 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
   const [submitting, setSubmitting] = useState(false);
   const [localLikeCount, setLocalLikeCount] = useState(post.like_count);
   const [showProfile, setShowProfile] = useState(false);
+  const [commentImage, setCommentImage] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const displayName = post.is_anonymous ? '匿名同学' : post.nickname;
   const images = Array.isArray(post.images) ? post.images : [];
@@ -63,15 +67,17 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
 
   const handleSubmitComment = async () => {
     const txt = commentText.trim();
-    if (!txt) return;
+    if (!txt && !commentImage) return;
     if (!getToken()) { showToast('请先登录'); return; }
     setSubmitting(true);
     try {
-      const body: any = { content: txt };
+      const body: any = { content: txt || '📷' };
       if (replyTo) body.parent_id = replyTo.id;
+      if (commentImage) body.image_url = commentImage;
       const res = await api.post(`/circle-posts/${post.id}/comment`, body);
       if (res.code === 0) {
         setCommentText('');
+        setCommentImage(null);
         setReplyTo(null);
         showToast('评论已发布');
         loadComments();
@@ -80,6 +86,26 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
       }
     } catch { showToast('评论失败', 'info'); }
     setSubmitting(false);
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast('请选择图片文件'); return; }
+    if (file.size > 5 * 1024 * 1024) { showToast('图片不能超过5MB'); return; }
+    setImageUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await api.upload<{ url: string }>('/upload', form);
+      if (res.code === 0 && res.data?.url) {
+        setCommentImage(res.data.url);
+      } else {
+        showToast(res.message || '上传失败');
+      }
+    } catch { showToast('上传失败'); }
+    setImageUploading(false);
+    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   const handleLikeClick = () => {
@@ -190,6 +216,9 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
                         <span className="text-[9px] text-gray-400">{timeAgo(c.created_at)}</span>
                       </div>
                       <p className="text-xs text-gray-600 mt-0.5">{c.content}</p>
+                      {c.image_url && (
+                        <img src={c.image_url} alt="" className="mt-1.5 w-15 h-15 rounded-lg object-cover border border-gray-100" referrerPolicy="no-referrer" />
+                      )}
                       <button
                         onClick={() => setReplyTo({ id: c.id, name: c.nickname })}
                         className="text-[10px] text-gray-400 hover:text-primary mt-1 cursor-pointer"
@@ -212,6 +241,9 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
                               <span className="text-[9px] text-gray-400">{timeAgo(r.created_at)}</span>
                             </div>
                             <p className="text-[11px] text-gray-600 mt-0.5">{r.content}</p>
+                            {r.image_url && (
+                              <img src={r.image_url} alt="" className="mt-1.5 w-12 h-12 rounded-lg object-cover border border-gray-100" referrerPolicy="no-referrer" />
+                            )}
                           </div>
                         </div>
                       ))}
@@ -249,6 +281,24 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
             </button>
           </div>
         )}
+        {/* 图片预览 */}
+        {commentImage && (
+          <div className="mb-2 relative inline-block">
+            <img src={commentImage} alt="" className="w-14 h-14 rounded-lg object-cover border border-gray-200" referrerPolicy="no-referrer" />
+            <button
+              onClick={() => setCommentImage(null)}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 cursor-pointer"
+            >
+              <Icon name="close" className="text-[10px]" />
+            </button>
+          </div>
+        )}
+        {imageUploading && (
+          <div className="mb-2 flex items-center gap-2 text-[10px] text-gray-400">
+            <div className="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+            上传中...
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <input
             value={commentText}
@@ -258,7 +308,16 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
             maxLength={500}
             className="flex-1 bg-slate-50 border border-gray-200 rounded-full px-4 py-2 text-xs focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none"
           />
-          <Button variant="primary" size="sm" onClick={handleSubmitComment} disabled={!commentText.trim() || submitting}>
+          <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={imageUploading}
+            className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-gray-400 hover:bg-slate-200 hover:text-gray-600 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+            aria-label="添加图片"
+          >
+            <Icon name="camera" className="text-sm" />
+          </button>
+          <Button variant="primary" size="sm" onClick={handleSubmitComment} disabled={(!commentText.trim() && !commentImage) || submitting}>
             {submitting ? '...' : '发送'}
           </Button>
         </div>

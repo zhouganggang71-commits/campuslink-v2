@@ -92,6 +92,7 @@ export const createCirclePostSchema = z.object({
 export const createCircleCommentSchema = z.object({
   content: z.string().min(1, '评论不能为空').max(500, '评论不超过500字'),
   parent_id: z.number().int().nullable().optional(),
+  image_url: z.string().max(500).optional(),
 });
 
 export const circlePostListQuerySchema = z.object({

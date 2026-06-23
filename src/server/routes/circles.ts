@@ -283,9 +283,10 @@ export function registerCircleRoutes(app: any, pool: any) {
       }
 
       const parentId = input.parent_id && typeof input.parent_id === 'number' ? input.parent_id : null;
+      const imageUrl = input.image_url?.trim().slice(0, 500) || null;
       const [result]: any = await pool.query(
-        'INSERT INTO circle_comments (post_id, user_id, parent_id, content) VALUES (?, ?, ?, ?)',
-        [postId, userId, parentId, trimmed]
+        'INSERT INTO circle_comments (post_id, user_id, parent_id, content, image_url) VALUES (?, ?, ?, ?, ?)',
+        [postId, userId, parentId, trimmed, imageUrl]
       );
 
       // 更新评论计数
@@ -294,7 +295,7 @@ export function registerCircleRoutes(app: any, pool: any) {
       logger.business('校园圈评论', { user_id: userId, post_id: postId, comment_id: result.insertId, trace_id: (req as any)._traceId });
 
       const [newComment]: any = await pool.query(
-        `SELECT cc.id, cc.post_id, cc.parent_id, cc.content, cc.created_at,
+        `SELECT cc.id, cc.post_id, cc.parent_id, cc.content, cc.image_url, cc.created_at,
                 u.nickname, u.auth_status
          FROM circle_comments cc JOIN users u ON cc.user_id = u.id WHERE cc.id = ?`,
         [result.insertId]
@@ -311,7 +312,7 @@ export function registerCircleRoutes(app: any, pool: any) {
     try {
       const { postId } = req.params;
       const [rows]: any = await pool.query(
-        `SELECT cc.id, cc.post_id, cc.parent_id, cc.content, cc.created_at,
+        `SELECT cc.id, cc.post_id, cc.parent_id, cc.content, cc.image_url, cc.created_at,
                 u.nickname, u.auth_status
          FROM circle_comments cc JOIN users u ON cc.user_id = u.id
          WHERE cc.post_id = ? AND cc.status = 'active'
