@@ -17,7 +17,7 @@ interface ProfileTabProps {
   savedListings: Listing[];
   onAuthClick: () => void;
   onLogout: () => void;
-  onShowToast: (msg: string) => void;
+  onShowToast: (msg: string, type?: 'success' | 'info') => void;
   onOpenDetail: (l: Listing) => void;
   onDelete: (id: string) => void;
   onStartEdit: (l: Listing) => void;
@@ -204,13 +204,17 @@ export default function ProfileTab({
     setAvatarError(false);
     try {
       // HEIC/HEIF 自动转 JPEG
-      if (file.type === 'image/heic' || file.type === 'image/heif') {
-        file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
-      }
-      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-        onShowToast('仅支持 JPG/PNG/WebP/GIF 格式');
-        setAvatarUploading(false);
-        return;
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+      if (isHeic) {
+        onShowToast('正在转换 HEIC 格式...', 'info');
+        try {
+          file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+        } catch {
+          onShowToast('HEIC 转换失败，请使用 JPG/PNG 格式', 'info');
+          setAvatarUploading(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
       }
       const form = new FormData();
       form.append('avatar', file);
@@ -234,13 +238,17 @@ export default function ProfileTab({
     setCoverError(false);
     try {
       // HEIC/HEIF 自动转 JPEG
-      if (file.type === 'image/heic' || file.type === 'image/heif') {
-        file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
-      }
-      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-        onShowToast('仅支持 JPG/PNG/WebP/GIF 格式');
-        setCoverUploading(false);
-        return;
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+      if (isHeic) {
+        onShowToast('正在转换 HEIC 格式...', 'info');
+        try {
+          file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+        } catch {
+          onShowToast('HEIC 转换失败，请使用 JPG/PNG 格式', 'info');
+          setCoverUploading(false);
+          if (coverInputRef.current) coverInputRef.current.value = '';
+          return;
+        }
       }
       const form = new FormData();
       form.append('cover', file);
