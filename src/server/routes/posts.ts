@@ -39,23 +39,23 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const sort = (req.query.sort as string) || 'default';
       const keyword = (req.query.keyword as string) || '';
 
-      let where = "WHERE status = 'active' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+      let where = "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
       const params: any[] = [];
       if (postType && postType !== 'all') {
-        where += ' AND post_type = ?';
+        where += ' AND p.post_type = ?';
         params.push(postType);
       }
       if (keyword) {
         const terms = keyword.replace(/[+\-*()~<>]/g, '').split(/\s+/).filter(Boolean);
         if (terms.length > 0) {
-          where += ' AND MATCH(title, description) AGAINST(? IN BOOLEAN MODE)';
+          where += ' AND MATCH(p.title, p.description) AGAINST(? IN BOOLEAN MODE)';
           params.push(terms.map(w => `+${w}*`).join(' '));
         }
       }
 
-      let orderBy = 'ORDER BY is_official DESC, views DESC, created_at DESC';
-      if (sort === 'time') orderBy = 'ORDER BY is_official DESC, created_at DESC';
-      if (sort === 'hot') orderBy = 'ORDER BY views DESC, created_at DESC';
+      let orderBy = 'ORDER BY p.is_official DESC, p.views DESC, p.created_at DESC';
+      if (sort === 'time') orderBy = 'ORDER BY p.is_official DESC, p.created_at DESC';
+      if (sort === 'hot') orderBy = 'ORDER BY p.views DESC, p.created_at DESC';
 
       const joinedSelect = `SELECT p.*, u.nickname AS publisher_name, u.avatar_url AS publisher_avatar,
         u.department AS publisher_department, u.org_level AS publisher_org_level,
@@ -67,7 +67,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
         limit,
         offset,
       ]);
-      const [countRows]: any = await pool.query(`SELECT COUNT(*) as total FROM posts ${where}`, params);
+      const [countRows]: any = await pool.query(`SELECT COUNT(*) as total FROM posts p ${where}`, params);
       ok(res, { list: rows.map(decryptPost), total: countRows[0].total, page, limit });
     } catch (err: any) {
       logger.error('获取帖子列表失败', { error: err.message, trace_id: req._traceId});
