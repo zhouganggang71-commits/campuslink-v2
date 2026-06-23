@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import Icon from '../ui/Icon';
 import { useTheme } from '../../utils/theme';
 interface HeaderProps {
@@ -16,7 +17,7 @@ const TAB_LABELS: Record<string, string> = {
   profile: '我的',
 };
 
-export default function Header({
+export default memo(function Header({
   selectedListing,
   activeTab,
   unreadCount,
@@ -67,4 +68,4 @@ export default function Header({
       </div>
     </header>
   );
-}
+});

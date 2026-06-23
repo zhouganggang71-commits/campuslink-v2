@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Message } from '../../types';
 import Icon from '../ui/Icon';
+import Button from '../ui/Button';
 
 interface MessagesTabProps {
   messages: Message[];
@@ -25,12 +26,7 @@ export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: Mes
             <p className="text-[10px] text-gray-400 mt-0.5">审核结果与校园通知</p>
           </div>
           {unreadCount > 0 && (
-            <button
-              onClick={onMarkAllRead}
-              className="bg-slate-100 text-primary hover:bg-slate-200 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer"
-            >
-              全标已读
-            </button>
+            <Button variant="ghost" size="sm" onClick={onMarkAllRead}>全标已读</Button>
           )}
         </div>
       </header>

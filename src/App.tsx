@@ -1,6 +1,7 @@
 /**
  * CampusLink 主入口 — 纯渲染，数据层和业务层已拆分到 hooks/
  */
+import { lazy, Suspense } from 'react';
 import { Listing } from './types';
 import { useAppData, clearStorageCache } from './hooks/useAppData';
 import { useAppActions } from './hooks/useAppActions';
@@ -8,18 +9,22 @@ import { setSession } from './utils/api';
 import { INITIAL_PROFILE } from './data';
 import Icon from './components/ui/Icon';
 import Toast from './components/ui/Toast';
+import Button from './components/ui/Button';
 import Header from './components/layout/Header';
 import BottomNav from './components/layout/BottomNav';
-import HomeTab from './components/page/HomeTab';
-import ScheduleTab from './components/page/ScheduleTab';
-import PublishTab from './components/page/PublishTab';
-import MessagesTab from './components/page/MessagesTab';
-import ProfileTab from './components/page/ProfileTab';
-import ListingDetail from './components/page/ListingDetail';
-import SearchPage from './components/page/SearchPage';
 import AuthModal from './components/modal/AuthModal';
 import AddCourseModal from './components/modal/AddCourseModal';
 import ShareScheduleModal from './components/modal/ShareScheduleModal';
+
+// 路由级懒加载 — 首屏仅加载当前 Tab
+const HomeTab = lazy(() => import('./components/page/HomeTab'));
+const ScheduleTab = lazy(() => import('./components/page/ScheduleTab'));
+const PublishTab = lazy(() => import('./components/page/PublishTab'));
+const MessagesTab = lazy(() => import('./components/page/MessagesTab'));
+const CircleTab = lazy(() => import('./components/page/CircleTab'));
+const ProfileTab = lazy(() => import('./components/page/ProfileTab'));
+const ListingDetail = lazy(() => import('./components/page/ListingDetail'));
+const SearchPage = lazy(() => import('./components/page/SearchPage'));
 
 const POST_TYPES: { key: Listing['postType'] | 'all'; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: 'apps' },
@@ -56,6 +61,7 @@ export default function App() {
       />
 
       <main className="w-full max-w-md bg-white min-h-[calc(100vh-3.5rem)] shadow-sm flex flex-col overflow-hidden relative pb-10">
+        <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
         {d.selectedListing ? (
           <ListingDetail
             listing={d.selectedListing}
@@ -77,7 +83,7 @@ export default function App() {
           />
         ) : (
           <div className="flex flex-col flex-1">
-            {d.activeTab === 'home' && (
+            <div style={{ display: d.activeTab === 'home' && !d.selectedListing ? undefined : 'none' }}>
               <HomeTab
                 listings={d.listings}
                 notices={d.notices}
@@ -87,47 +93,62 @@ export default function App() {
                 openListingDetails={a.openListingDetails}
                 onPublishTab={() => d.setActiveTab('publish')}
                 onOpenSearch={() => d.setIsSearchOpen(true)}
+                onRefresh={d.refreshPosts}
+                refreshing={d.listRefreshing}
+                onLoadMore={d.loadMorePosts}
+                hasMore={d.listHasMore}
+                loading={d.listLoading}
               />
-            )}
+            </div>
 
-            {(d.isGuest || d.isPending) && d.activeTab === 'schedule' && (
-              <LockPage isPending={d.isPending} label="课表" onAuth={() => d.setIsAuthModalOpen(true)} />
-            )}
-            {d.activeTab === 'schedule' && !d.isGuest && !d.isPending && (
-              <ScheduleTab
-                courses={d.courses}
-                onAddCourse={() => d.setIsAddCourseOpen(true)}
-                onImportCourses={a.handleImportCourses}
-                onShareSchedule={a.handleShareSchedule}
-                onDeleteCourse={a.handleDeleteCourse}
+            <div style={{ display: d.isGuest || d.isPending ? (d.activeTab === 'schedule' ? undefined : 'none') : (d.activeTab === 'schedule' ? undefined : 'none') }}>
+              {(d.isGuest || d.isPending) ? (
+                <LockPage isPending={d.isPending} label="课表" onAuth={() => d.setIsAuthModalOpen(true)} />
+              ) : (
+                <ScheduleTab
+                  courses={d.courses}
+                  onAddCourse={() => d.setIsAddCourseOpen(true)}
+                  onImportCourses={a.handleImportCourses}
+                  onShareSchedule={a.handleShareSchedule}
+                  onDeleteCourse={a.handleDeleteCourse}
+                />
+              )}
+            </div>
+
+            <div style={{ display: d.isGuest || d.isPending ? (d.activeTab === 'publish' ? undefined : 'none') : (d.activeTab === 'publish' ? undefined : 'none') }}>
+              {(d.isGuest || d.isPending) ? (
+                <LockPage isPending={d.isPending} label="发布" onAuth={() => d.setIsAuthModalOpen(true)} />
+              ) : (
+                <PublishTab
+                  onPublish={a.handlePublish}
+                  onCancel={() => {
+                    d.setActiveTab('home');
+                    d.setEditingListing(null);
+                  }}
+                  isOrg={!!d.profile.orgLevel && !!d.profile.position}
+                  isVerified={d.profile.isVerified}
+                  editListing={d.editingListing}
+                />
+              )}
+            </div>
+
+            <div style={{ display: d.activeTab === 'circles' ? undefined : 'none' }}>
+              <CircleTab
+                showToast={d.showToast}
+                isGuest={d.isGuest}
+                onAuth={() => d.setIsAuthModalOpen(true)}
               />
-            )}
+            </div>
 
-            {(d.isGuest || d.isPending) && d.activeTab === 'publish' && (
-              <LockPage isPending={d.isPending} label="发布" onAuth={() => d.setIsAuthModalOpen(true)} />
-            )}
-            {d.activeTab === 'publish' && !d.isGuest && (
-              <PublishTab
-                onPublish={a.handlePublish}
-                onCancel={() => {
-                  d.setActiveTab('home');
-                  d.setEditingListing(null);
-                }}
-                isOrg={!!d.profile.orgLevel && !!d.profile.position}
-                isVerified={d.profile.isVerified}
-                editListing={d.editingListing}
-              />
-            )}
-
-            {d.activeTab === 'messages' && (
+            <div style={{ display: d.activeTab === 'messages' ? undefined : 'none' }}>
               <MessagesTab
                 messages={d.messages}
                 onMarkRead={a.handleMarkMessageRead}
                 onMarkAllRead={a.handleMarkAllRead}
               />
-            )}
+            </div>
 
-            {d.activeTab === 'profile' && (
+            <div style={{ display: d.activeTab === 'profile' ? undefined : 'none' }}>
               <ProfileTab
                 profile={d.profile}
                 savedCount={d.savedCount}
@@ -139,7 +160,6 @@ export default function App() {
                   clearStorageCache();
                   d.setProfile(INITIAL_PROFILE);
                   d.setCourses([]);
-                  d.setListings([]);
                   d.setMessages([]);
                   d.setSavedListingIds([]);
                   d.showToast('已退出', 'info');
@@ -148,8 +168,10 @@ export default function App() {
                 onOpenDetail={a.openListingDetails}
                 onDelete={a.handleDelete}
                 onStartEdit={a.handleStartEdit}
+                onUpdateProfile={d.setProfile}
+                toggleSaveListing={a.toggleSaveListing}
               />
-            )}
+            </div>
           </div>
         )}
 
@@ -167,6 +189,7 @@ export default function App() {
             />
           </div>
         )}
+        </Suspense>
       </main>
 
       <BottomNav
@@ -217,9 +240,7 @@ function LockPage({ isPending, label, onAuth }: { isPending: boolean; label: str
       <p className="text-sm font-semibold text-gray-500">{isPending ? '账号审核中' : `游客模式无法使用${label}`}</p>
       <p className="text-xs mt-1">{isPending ? '审核通过后即可使用' : '请先完成学生身份认证'}</p>
       {!isPending && (
-        <button onClick={onAuth} className="mt-4 bg-primary text-white text-xs font-semibold px-4 py-2 rounded-lg">
-          去认证
-        </button>
+        <Button variant="primary" size="sm" onClick={onAuth}>去认证</Button>
       )}
     </div>
   );

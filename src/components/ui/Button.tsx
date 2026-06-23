@@ -1,4 +1,4 @@
-import { ReactNode, ButtonHTMLAttributes } from 'react';
+import { ReactNode, ButtonHTMLAttributes, memo } from 'react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -19,7 +19,7 @@ const sizes = {
   md: 'py-3 text-sm font-semibold',
 };
 
-export default function Button({
+export default memo(function Button({
   variant = 'primary',
   size = 'md',
   block,
@@ -37,4 +37,4 @@ export default function Button({
       {children}
     </button>
   );
-}
+});

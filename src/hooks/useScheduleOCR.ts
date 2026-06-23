@@ -25,8 +25,8 @@ export function useScheduleOCR(onImportCourses: (courses: Omit<Course, 'id'>[]) 
     setOcrProgress('恢复识别中...');
 
     let parsedCourses: Omit<Course, 'id' | 'colorClass'>[] | null = null;
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
       if (!mountedRef.current) { pollingRef.current = false; return; }
       const pollRes = await api.get<{ status: string; courses?: any[]; error?: string }>(`/ocr-schedule/${taskId}`);
       if (pollRes.code !== 0) continue;

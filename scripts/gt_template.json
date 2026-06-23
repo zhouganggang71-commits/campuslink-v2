@@ -1,0 +1,16 @@
+[
+  {
+    "image": "sample_001.jpg",
+    "description": "教务系统导出PDF转图 — 标准格式",
+    "courses": [
+      {"name":"计算机网络","teacher":"王教授","classroom":"信息楼A302","weekday":3,"startPeriod":3,"periodSpan":2,"weekStart":1,"weekEnd":16,"weekType":"all","courseType":"theory"},
+      {"name":"高等数学","teacher":"李老师","classroom":"教学楼B101","weekday":1,"startPeriod":1,"periodSpan":2,"weekStart":1,"weekEnd":18,"weekType":"all","courseType":"theory"}
+    ]
+  },
+  {
+    "image": "sample_002.jpg",
+    "description": "手机拍照 — 良好光线",
+    "courses": [
+    ]
+  }
+]

@@ -1,9 +1,10 @@
 import { useState, useMemo, useRef } from 'react';
 import { Course } from '../../types';
-import { useScheduleOCR } from '../../hooks/useScheduleOCR';
+import { api } from '../../utils/api';
 import Icon from '../ui/Icon';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import ScheduleImportModal from '../modal/ScheduleImportModal';
 
 interface ScheduleTabProps {
   courses: Course[];
@@ -27,17 +28,12 @@ export default function ScheduleTab({
   const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
   const [scheduleView, setScheduleView] = useState<'week' | 'day'>('week');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const selectedDay = useMemo(() => {
     const d = new Date().getDay();
     return d === 0 ? 7 : d;
   }, []);
-
-  const {
-    ocrResult, ocrSelected, ocrError, ocrProgress,
-    handleUploadSchedule, handleImportOCR, toggleOcrSelect,
-    setOcrSelected,
-  } = useScheduleOCR(onImportCourses);
 
   // ── 周过滤 ──
   const weekCourses = useMemo(
@@ -169,7 +165,7 @@ export default function ScheduleTab({
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500 font-medium mt-2">
-                        <span className="flex items-center gap-1"><Icon name="clock" className="text-sm text-[#4A90D9]" />{({ 1: '08:00', 3: '10:00', 5: '14:00', 7: '16:00', 9: '19:00', 11: '20:30' } as Record<number, string>)[course.startPeriod] || `${course.startPeriod}:00`}</span>
+                        <span className="flex items-center gap-1"><Icon name="clock" className="text-sm text-primary" />{({ 1: '08:00', 3: '10:00', 5: '14:00', 7: '16:00', 9: '19:00', 11: '20:30' } as Record<number, string>)[course.startPeriod] || `${course.startPeriod}:00`}</span>
                         <span className="flex items-center gap-1"><Icon name="map_pin" className="text-sm text-gray-500" />{course.classroom}</span>
                       </div>
                     </div>
@@ -181,76 +177,19 @@ export default function ScheduleTab({
         );
       })()}
 
-      {/* 底部操作区 */}
-      <section className="px-4 mt-auto py-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-3">
-        {/* OCR 上传 */}
-        <label className="flex-1 flex items-center justify-center gap-2 bg-course-green/5 border border-dashed border-course-green/30 rounded-xl py-3 cursor-pointer hover:bg-course-green/10 transition-colors active:scale-[0.99]">
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleUploadSchedule} className="hidden" />
-          <Icon name="file_text" className="text-course-green text-lg" />
-          <span className="text-xs font-semibold text-course-green">上传课表（PDF/图片）</span>
-        </label>
-
-        {/* OCR 进度 */}
-        {ocrProgress && (
-          <div className="bg-course-blue/5 border border-course-blue/20 rounded-xl px-3 py-2 flex items-center gap-2 animate-fade-in">
-            <span className="w-3 h-3 border-2 border-course-blue border-t-transparent rounded-full animate-spin"></span>
-            <span className="text-[11px] text-course-blue font-medium">{ocrProgress}</span>
-          </div>
-        )}
-
-        {/* OCR 错误 */}
-        {ocrError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2 animate-fade-in">
-            <Icon name="x" className="text-red-500 text-lg shrink-0 mt-0.5" />
-            <div>
-              <span className="text-xs font-bold text-red-600">识别失败</span>
-              <p className="text-[11px] text-red-500 mt-1">{ocrError}</p>
-              <p className="text-[10px] text-red-400 mt-1">请确保图片清晰、光线充足、课表文字完整可见</p>
-            </div>
-          </div>
-        )}
-
-        {/* OCR 结果 */}
-        {ocrResult && (
-          <div className="bg-course-blue/5 border border-course-blue/20 rounded-xl p-3 animate-fade-in">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-course-blue flex items-center gap-1"><Icon name="scan_text" className="text-sm" /> 识别到 {ocrResult.length} 门课程</span>
-              <div className="flex gap-2">
-                <button onClick={() => setOcrSelected?.(new Set(ocrResult.map((_, i) => i)))} className="text-[10px] text-primary font-semibold">全选</button>
-                <button onClick={() => setOcrSelected?.(new Set())} className="text-[10px] text-gray-400 font-semibold">取消全选</button>
-              </div>
-            </div>
-            <div className="space-y-1.5 max-h-48 overflow-y-auto">
-              {ocrResult.map((c, i) => (
-                <div key={i} onClick={() => toggleOcrSelect(i)} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all ${ocrSelected.has(i) ? 'bg-white border border-course-blue/30 shadow-sm' : 'bg-white/50 border border-transparent'}`}>
-                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${ocrSelected.has(i) ? 'bg-course-blue border-course-blue' : 'border-gray-300'}`}>
-                    {ocrSelected.has(i) && <Icon name="check" className="text-white text-[10px]" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-semibold text-gray-800">{c.name}</span>
-                    <span className="text-[10px] text-gray-400 ml-2">{c.teacher} · {WEEKDAYS[(c.weekday || 1) - 1]} {c.startPeriod}-{c.startPeriod + c.periodSpan - 1}节{c.classroom ? ` · ${c.classroom}` : ''}{c.weekStart !== 1 || c.weekEnd !== 18 ? ` · 第${c.weekStart}-${c.weekEnd}周` : ''}{c.weekType === 'odd' ? ' · 单周' : c.weekType === 'even' ? ' · 双周' : ''}</span>
-                  </div>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.colorClass.split(' ')[0]} text-white`}>{c.courseType === 'lab' ? '实验' : c.courseType === 'elective' ? '选修' : '理论'}</span>
-                </div>
-              ))}
-            </div>
-            <button onClick={handleImportOCR} disabled={ocrSelected.size === 0}
-              className="w-full mt-2 bg-course-blue text-white py-2 rounded-lg text-xs font-semibold active:scale-[0.98] cursor-pointer disabled:opacity-50">
-              导入选中课程 ({ocrSelected.size})
-            </button>
-          </div>
-        )}
-
-        {/* 操作按钮 */}
-        <div className="flex gap-3">
-          <button onClick={onAddCourse} className="flex-1 bg-primary text-white py-2.5 rounded-lg text-xs font-semibold shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
-            <Icon name="plus" className="text-sm font-bold" /> 手动添加课程
-          </button>
-          <button onClick={onShareSchedule} className="flex-1 border border-primary text-primary py-2.5 rounded-lg text-xs font-semibold active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 bg-white hover:bg-slate-50">
-            <Icon name="share_2" className="text-sm font-bold" /> 分享课表
-          </button>
-        </div>
+      <section className="px-4 mt-auto py-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+        <button onClick={() => setImportOpen(true)}
+          className="flex-1 flex items-center justify-center gap-2 border border-dashed border-primary/30 rounded-xl py-3 cursor-pointer hover:bg-primary/5 transition-colors">
+          <Icon name="file_text" className="text-primary text-lg" />
+          <span className="text-xs font-semibold text-primary">导入课表（PDF/HTML）</span>
+        </button>
+        <button onClick={onAddCourse}
+          className="flex items-center justify-center gap-2 border border-dashed border-gray-300 rounded-xl px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
+          <Icon name="add" className="text-gray-500 text-lg" />
+        </button>
       </section>
+
+      <ScheduleImportModal isOpen={importOpen} onClose={() => setImportOpen(false)} onImport={onImportCourses} />
 
       {/* 课程详情弹窗 */}
       {selectedCourse && (

@@ -121,7 +121,7 @@ async function request<T>(
       const errBody = await resp.json().catch(() => ({}));
       return { code: -1, message: errBody.message || `HTTP ${resp.status}`, detail: errBody.detail };
     }
-    return resp.json();
+    return await resp.json();
   } catch (err: any) {
     return { code: -1, message: err.message || '网络异常' };
   }
@@ -156,7 +156,7 @@ async function uploadRequest<T>(
       const errBody = await resp.json().catch(() => ({}));
       return { code: -1, message: errBody.message || `HTTP ${resp.status}`, detail: errBody.detail };
     }
-    return resp.json();
+    return await resp.json();
   } catch (err: any) {
     return { code: -1, message: err.message || '网络异常' };
   }

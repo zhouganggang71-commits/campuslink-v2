@@ -10,6 +10,7 @@ export const ErrorCode = {
 
   // 404 Not Found
   NOT_FOUND: 4041,
+  CIRCLE_POST_NOT_FOUND: 4042,
 
   // 401 Unauthorized
   UNAUTHORIZED: 4011,

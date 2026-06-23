@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import type { ReactNode } from 'react';
+import Button from './Button';
 
 interface Props {
   children: ReactNode;
@@ -46,12 +47,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <div className="text-5xl mb-4">:(</div>
             <p className="text-sm font-semibold text-gray-500 mb-1">页面遇到问题</p>
             <p className="text-xs mb-4">请刷新页面重试</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-primary text-white text-xs font-semibold px-4 py-2 rounded-lg"
-            >
+            <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
               刷新页面
-            </button>
+            </Button>
             {this.state.error && (
               <details className="mt-4 text-xs text-gray-400 max-w-md">
                 <summary className="cursor-pointer">错误详情</summary>

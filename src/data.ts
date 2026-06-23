@@ -7,6 +7,7 @@ export const INITIAL_PROFILE: StudentProfile = {
   orgLevel: '院级',
   position: '',
   avatarUrl: '',
+  bio: '',
   isVerified: false,
   isAdmin: false,
   postsCount: 0,

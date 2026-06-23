@@ -19,11 +19,13 @@ export function registerAdminRoutes(app: any, pool: Pool) {
       const [posts]: any = await pool.query('SELECT COUNT(*) as c FROM posts');
       const [regs]: any = await pool.query('SELECT COUNT(*) as c FROM registrations');
       const [pending]: any = await pool.query("SELECT COUNT(*) as c FROM users WHERE auth_status='pending'");
+      const [orgPending]: any = await pool.query("SELECT COUNT(*) as c FROM users WHERE auth_status='pending' AND org_level != '' AND position != ''");
       ok(res, {
         users: users[0].c,
         posts: posts[0].c,
         registrations: regs[0].c,
         pendingUsers: pending[0].c,
+        orgPending: orgPending[0].c,
       });
     } catch (err: any) {
       logger.error('管理统计失败', { error: err.message, trace_id: req._traceId});
@@ -63,11 +65,31 @@ export function registerAdminRoutes(app: any, pool: Pool) {
     try {
       const input = validate(res, updatePostStatusSchema, req.body);
       if (!input) return;
+
+      // 先获取帖子信息（用于写通知）
+      const [postRows]: any = await pool.query('SELECT user_id, title FROM posts WHERE id = ?', [String(req.params.id)]);
+
       await pool.query('UPDATE posts SET status = ?, reject_reason = ? WHERE id = ?', [
         input.status,
         input.rejectReason || null,
         String(req.params.id),
       ]);
+
+      // ── 向帖子作者推送审核结果通知 ──
+      if (postRows.length > 0 && postRows[0].user_id) {
+        const postUserId = postRows[0].user_id;
+        const postTitle = postRows[0].title || '未命名帖子';
+        const statusLabel = input.status === 'active' ? '已通过审核' : '已被打回';
+        const noticeContent = input.status === 'rejected' && input.rejectReason
+          ? `你的帖子「${postTitle}」已被打回。原因：${input.rejectReason}`
+          : `你的帖子「${postTitle}」${statusLabel}，现已公开可见`;
+
+        await pool.query(
+          "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
+          [postUserId, `帖子审核${input.status === 'active' ? '通过' : '打回'}`, noticeContent],
+        ).catch((err: any) => logger.warn('审核通知写入失败', { error: err.message, post_id: req.params.id }));
+      }
+
       logger.business('帖子审核', { post_id: String(req.params.id), status: input.status, trace_id: req._traceId });
       ok(res, null, '已更新');
     } catch (err: any) {
@@ -81,7 +103,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
     try {
       const status = (req.query.status as string) || 'all';
       const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
-      let query = 'SELECT id, student_id, nickname, auth_status, is_admin, created_at FROM users';
+      let query = 'SELECT id, student_id, nickname, auth_status, is_admin, department, org_level, position, created_at FROM users';
       const params: any[] = [];
       if (status !== 'all') {
         query += ' WHERE auth_status = ?';
@@ -101,8 +123,29 @@ export function registerAdminRoutes(app: any, pool: Pool) {
     try {
       const input = validate(res, updateUserStatusSchema, req.body);
       if (!input) return;
+
+      // 先获取用户信息（用于写通知）
+      const [userRows]: any = await pool.query('SELECT nickname FROM users WHERE id = ?', [req.params.id]);
+
       await pool.query('UPDATE users SET auth_status = ? WHERE id = ?', [input.auth_status, req.params.id]);
       clearAuthCache(parseInt(String(req.params.id)));
+
+      // ── 向用户推送身份审核结果通知 ──
+      if (userRows.length > 0) {
+        const userName = userRows[0].nickname || '同学';
+        const statusMap: Record<string, string> = {
+          verified: '你的身份认证已通过审核，现在可以使用全部功能了',
+          rejected: '你的身份认证未通过审核，请检查提交的信息后重新认证',
+        };
+        const content = statusMap[input.auth_status];
+        if (content) {
+          await pool.query(
+            "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
+            [req.params.id, `身份认证${input.auth_status === 'verified' ? '通过' : '打回'}`, `${userName}，${content}`],
+          ).catch((err: any) => logger.warn('审核通知写入失败', { error: err.message, user_id: req.params.id }));
+        }
+      }
+
       logger.business('用户审核', { user_id: String(req.params.id), status: input.auth_status, trace_id: req._traceId });
       ok(res, null, '已更新');
     } catch (err: any) {
@@ -111,17 +154,23 @@ export function registerAdminRoutes(app: any, pool: Pool) {
     }
   });
 
-  // ── 课表 ──
+  // ── 课表（按用户分组）──
   app.get('/api/v1/admin/courses', adminAuth, async (req: Request, res: Response) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
+      const userId = req.query.user_id as string;
+      if (userId) {
+        // 查看单个用户的课程
+        const [rows]: any = await pool.query(
+          'SELECT c.* FROM courses c WHERE c.user_id = ? ORDER BY c.weekday, c.start_period',
+          [userId],
+        );
+        return ok(res, { courses: rows });
+      }
+      // 用户列表（有课表的）
       const [rows]: any = await pool.query(
-        'SELECT c.*, u.nickname FROM courses c LEFT JOIN users u ON c.user_id = u.id ORDER BY c.id DESC LIMIT ? OFFSET ?',
-        [limit, (page - 1) * limit],
+        'SELECT u.id, u.nickname, u.student_id, COUNT(c.id) AS course_count FROM users u JOIN courses c ON c.user_id = u.id GROUP BY u.id ORDER BY u.id DESC',
       );
-      const [countRows]: any = await pool.query('SELECT COUNT(*) as total FROM courses');
-      ok(res, { list: rows, total: countRows[0].total });
+      ok(res, { users: rows });
     } catch (err: any) {
       logger.error('管理API失败', { error: err.message, trace_id: req._traceId});
       fail(res, 500, '获取失败');

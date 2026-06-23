@@ -24,6 +24,7 @@ export function registerCourseRoutes(app: any, pool: Pool) {
 
   app.post('/api/v1/courses', auth, limiter(50), async (req: Request, res: Response) => {
     try {
+      if (!req.isVerified) return fail(res, 403, '账号待审核，审核通过后才能使用课表');
       const input = validate(res, createCourseSchema, req.body);
       if (!input) return;
 
@@ -64,12 +65,17 @@ export function registerCourseRoutes(app: any, pool: Pool) {
     const courses = req.body;
     if (!Array.isArray(courses)) return fail(res, 400, '请求体必须是课程数组');
 
-    // 逐项 Zod 校验（与单条 POST 一致）
-    for (let i = 0; i < courses.length; i++) {
+    // 逐项校验，单项失败跳过而非整批拒绝
+    for (let i = courses.length - 1; i >= 0; i--) {
       const parsed = validate(res, createCourseSchema, courses[i]);
-      if (!parsed) return;
-      courses[i] = parsed;
+      if (!parsed) {
+        logger.warn('课表批量导入跳过无效项', { index: i, course: JSON.stringify(courses[i]).slice(0, 200), trace_id: (req as any)._traceId });
+        courses.splice(i, 1);
+      } else {
+        courses[i] = parsed;
+      }
     }
+    if (courses.length === 0) return fail(res, 400, '没有有效课程可导入');
 
     const conn = await pool.getConnection();
     try {

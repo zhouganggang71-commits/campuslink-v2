@@ -37,8 +37,28 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
           input.department || '',
           encrypt(input.phone) || '',
           req.userId,
+          input.idempotencyKey || null,
         ],
       );
+
+      // ── 通知活动发布者：有人报名了你的活动 ──
+      try {
+        const [postRows]: any = await pool.query('SELECT user_id, title FROM posts WHERE id = ?', [input.listingId]);
+        if (postRows.length > 0 && postRows[0].user_id && postRows[0].user_id !== req.userId) {
+          const registrantName = input.registrantName || '匿名用户';
+          await pool.query(
+            "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
+            [
+              postRows[0].user_id,
+              '活动新报名',
+              `${registrantName} 报名了你的活动「${postRows[0].title || input.listingTitle}」`,
+            ],
+          );
+        }
+      } catch (noticeErr: any) {
+        logger.warn('报名通知写入失败', { error: noticeErr.message, listing_id: input.listingId, trace_id: req._traceId });
+      }
+
       logger.business('活动报名', {
         listing_id: input.listingId,
         listing_title: input.listingTitle.slice(0, 50),

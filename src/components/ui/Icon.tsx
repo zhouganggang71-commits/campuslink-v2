@@ -22,6 +22,7 @@ import {
   Clock,
   MapPin,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   ChevronLeft,
   Handshake,
@@ -62,7 +63,9 @@ import {
   ShieldAlert,
   Sun,
   Moon,
+  UsersRound,
 } from 'lucide-react';
+import { memo } from 'react';
 
 const MAP: Record<string, React.ComponentType<{ className?: string; size?: number }>> = {
   home: Home,
@@ -90,6 +93,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   verified: BadgeCheck,
   local_fire_department: Flame,
   campaign: Megaphone,
+  megaphone: Megaphone,
   delete: Trash2,
   trash_2: Trash2,
   schedule: Clock,
@@ -97,6 +101,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   location_on: MapPin,
   map_pin: MapPinned,
   expand_more: ChevronDown,
+  expand_less: ChevronUp,
   chevron_down: ChevronDown,
   chevron_right: ChevronRight,
   chevron_left: ChevronLeft,
@@ -141,6 +146,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   light_mode: Sun,
   dark_mode: Moon,
   sunny: Sun,
+  group: UsersRound,
 };
 
 function sizeClass(cls: string): number {
@@ -153,11 +159,13 @@ function sizeClass(cls: string): number {
   return 16;
 }
 
-export default function Icon({ name, className = '' }: { name: string; className?: string }) {
+const Icon = memo(function Icon({ name, className = '' }: { name: string; className?: string }) {
   const Comp = MAP[name];
   if (!Comp) {
     console.warn(`[Icon] 未注册的图标: "${name}"`);
     return <span className={className}>?</span>;
   }
   return <Comp className={className} size={sizeClass(className)} />;
-}
+});
+
+export default Icon;

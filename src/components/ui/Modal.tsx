@@ -9,28 +9,83 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md';
+  /** 'center' = 居中弹窗（默认），'bottom' = 底部弹出（bottom-sheet） */
+  position?: 'center' | 'bottom';
+  /** 是否显示右上角关闭按钮，默认 true */
+  showCloseButton?: boolean;
 }
 
-export default function Modal({ isOpen, onClose, title, subtitle, children, footer, size = 'md' }: ModalProps) {
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  subtitle,
+  children,
+  footer,
+  size = 'md',
+  position = 'center',
+  showCloseButton = true,
+}: ModalProps) {
   if (!isOpen) return null;
 
+  const isCenter = position === 'center';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-reveal">
-      <div onClick={onClose} className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity" />
+    <div
+      className={`fixed inset-0 z-50 flex ${isCenter ? 'items-center justify-center p-4' : 'items-end justify-center'} animate-reveal`}
+    >
+      {/* 遮罩层 */}
       <div
-        className={`relative bg-white rounded-2xl shadow-2xl z-10 flex flex-col ${size === 'sm' ? 'w-full max-w-sm' : 'w-full max-w-md'}`}
+        onClick={onClose}
+        className={`absolute inset-0 bg-black/40 transition-opacity ${isCenter ? 'backdrop-blur-xs' : ''}`}
+      />
+
+      {/* 卡片 */}
+      <div
+        className={`relative bg-white shadow-2xl z-10 flex flex-col ${
+          isCenter ? 'rounded-2xl' : 'rounded-t-[20px]'
+        } ${isCenter ? (size === 'sm' ? 'w-full max-w-sm' : 'w-full max-w-md') : 'w-full max-w-lg max-h-[92vh]'}`}
       >
-        {(title || subtitle) && (
-          <div className="px-5 pt-5 pb-2">
-            {title && <h2 className="text-base font-bold text-on-surface">{title}</h2>}
-            {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+        {/* 底部弹出模式：拖拽手柄 */}
+        {!isCenter && (
+          <div onClick={onClose} className="w-full flex justify-center py-3 cursor-pointer shrink-0">
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
           </div>
         )}
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 cursor-pointer">
-          <Icon name="x" className="text-lg" />
-        </button>
-        <div className="px-5 py-3 overflow-y-auto">{children}</div>
-        {footer && <div className="px-5 pb-5 pt-1">{footer}</div>}
+
+        {/* 标题 / 副标题 */}
+        {(title || subtitle) && (
+          <div className={`${isCenter ? 'px-5 pt-5 pb-2' : 'px-6 pb-4'}`}>
+            {title && (
+              <h2
+                className={`font-headline font-bold text-on-surface ${isCenter ? 'text-base' : 'text-lg'} ${subtitle ? 'mb-0.5' : ''}`}
+              >
+                {title}
+              </h2>
+            )}
+            {subtitle && <p className="text-[11px] text-gray-400">{subtitle}</p>}
+          </div>
+        )}
+
+        {/* 关闭按钮（居中模式默认显示） */}
+        {showCloseButton && isCenter && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 cursor-pointer"
+          >
+            <Icon name="x" className="text-lg" />
+          </button>
+        )}
+
+        {/* 内容区 */}
+        <div className={`overflow-y-auto ${isCenter ? 'px-5 py-3' : 'px-6 py-4'}`}>{children}</div>
+
+        {/* 底部按钮区 */}
+        {footer && (
+          <div className={`shrink-0 ${isCenter ? 'px-5 pb-5 pt-1' : 'border-t border-slate-100 px-4 pb-6 pt-4'}`}>
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

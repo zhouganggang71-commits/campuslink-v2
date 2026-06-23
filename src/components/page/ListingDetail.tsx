@@ -36,12 +36,13 @@ export default function ListingDetail({
   isGuest,
 }: ListingDetailProps) {
   const isSaved = savedListingIds.includes(listing.id);
+  const isReal = /^\d+$/.test(listing.id); // 真实帖子 ID 为纯数字，mock 数据 ID 如 headphones-1 非数字
   const [isReportOpen, setIsReportOpen] = useState(false);
   const isOwn = listing.publisherName === currentUserName;
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
-      <section className="relative w-full aspect-square bg-[#eaeaea] overflow-hidden">
+      <section className="relative w-full aspect-square bg-gray-100 overflow-hidden">
         <div
           className="w-full h-full flex transition-transform duration-300"
           style={{ transform: `translateX(-${carouselIndex * 100}%)` }}
@@ -205,24 +206,35 @@ export default function ListingDetail({
               {listing.views}
             </span>
             <span className="flex items-center gap-1">
-              <Icon name="favorite" className="text-sm" />
-              {listing.favorites + (isSaved ? 1 : 0)}
+              {isSaved && <Icon name="favorite" className="text-sm text-course-red" />}
             </span>
           </div>
         </div>
       </section>
 
       <div className="sticky bottom-0 left-0 w-full bg-white border-t border-gray-100 px-4 py-3 flex items-center justify-between gap-4 shadow-[0px_-4px_12px_rgba(0,0,0,0.05)] z-30">
-        <button
-          onClick={() => toggleSaveListing(listing.id)}
-          className="flex flex-col items-center justify-center min-w-[50px] text-gray-400 hover:text-primary transition-colors cursor-pointer"
-        >
-          <Icon
-            name={isSaved ? 'favorite' : 'favorite_border'}
-            className={`text-2xl ${isSaved ? 'text-course-red' : ''}`}
-          />
-          <span className="text-[10px] font-medium mt-0.5">{isSaved ? '已收藏' : '收藏'}</span>
-        </button>
+        {!isReal ? (
+          <div className="flex flex-col items-center justify-center min-w-[50px] text-gray-300">
+            <Icon name="favorite_border" className="text-2xl" />
+            <span className="text-[10px] font-medium mt-0.5">收藏</span>
+          </div>
+        ) : isGuest ? (
+          <div className="flex flex-col items-center justify-center min-w-[50px] text-gray-300">
+            <Icon name="favorite_border" className="text-2xl" />
+            <span className="text-[10px] font-medium mt-0.5">收藏</span>
+          </div>
+        ) : (
+          <button
+            onClick={() => toggleSaveListing(listing.id)}
+            className="flex flex-col items-center justify-center min-w-[50px] text-gray-400 hover:text-primary transition-colors cursor-pointer"
+          >
+            <Icon
+              name={isSaved ? 'favorite' : 'favorite_border'}
+              className={`text-2xl ${isSaved ? 'text-course-red' : ''}`}
+            />
+            <span className="text-[10px] font-medium mt-0.5">{isSaved ? '已收藏' : '收藏'}</span>
+          </button>
+        )}
         {!isOwn && listing.postType === 'activity' && !isGuest && (
           <Suspense fallback={null}>
             <RegisterPanel

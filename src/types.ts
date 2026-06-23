@@ -97,6 +97,7 @@ export interface StudentProfile {
   orgLevel: OrgLevel;
   position: Position | '';
   avatarUrl: string;
+  bio: string;
   isVerified: boolean;
   isAdmin: boolean;
   postsCount: number;

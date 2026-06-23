@@ -1,6 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Listing } from '../../types';
+import { api } from '../../utils/api';
 import Icon from '../ui/Icon';
+import Button from '../ui/Button';
+import type { CirclePost } from '../../hooks/useCircles';
 
 interface SearchPageProps {
   listings: Listing[];
@@ -18,17 +21,30 @@ export default function SearchPage({
   postTypeLabel,
 }: SearchPageProps) {
   const [query, setQuery] = useState('');
+  const [circlePosts, setCirclePosts] = useState<CirclePost[]>([]);
+
+  useEffect(() => {
+    api.get<{ list: CirclePost[] }>('/circles/trending?page=1&size=50').then((res) => {
+      if (res.code === 0 && res.data?.list) setCirclePosts(res.data.list);
+    }).catch(() => {});
+  }, []);
 
   const results = useMemo(() => {
-    if (!query.trim()) return [];
+    if (!query.trim()) return { posts: [] as Listing[], circles: [] as CirclePost[] };
     const q = query.toLowerCase();
-    return listings.filter(
+    const matchedPosts = listings.filter(
       (l) =>
         l.title.toLowerCase().includes(q) ||
         l.description.toLowerCase().includes(q) ||
         l.category.toLowerCase().includes(q),
     );
-  }, [listings, query]);
+    const matchedCircles = circlePosts.filter(
+      (p) => p.content.toLowerCase().includes(q),
+    );
+    return { posts: matchedPosts, circles: matchedCircles };
+  }, [listings, circlePosts, query]);
+
+  const totalResults = results.posts.length + results.circles.length;
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
@@ -66,16 +82,19 @@ export default function SearchPage({
             <Icon name="search" className="text-5xl mb-3 text-gray-200" />
             <p className="text-xs">输入关键词搜索信息</p>
           </div>
-        ) : results.length === 0 ? (
+        ) : results.posts.length === 0 && results.circles.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Icon name="search_off" className="text-5xl mb-3 text-gray-200" />
             <p className="text-xs">没有找到"{query}"相关的结果</p>
           </div>
         ) : (
           <div>
-            <p className="text-[10px] text-gray-400 font-bold mb-3">找到 {results.length} 条结果</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {results.map((item) => (
+            <p className="text-[10px] text-gray-400 font-bold mb-3">找到 {totalResults} 条结果</p>
+            {results.posts.length > 0 && (
+              <>
+                <p className="text-[10px] text-gray-400 font-semibold mb-2">信息广场</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {results.posts.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => onOpenDetail(item)}
@@ -113,14 +132,31 @@ export default function SearchPage({
                       <div className="flex items-center gap-1 text-[10px] text-gray-400">
                         <Icon name="visibility" className="text-[10px]" />
                         {item.views}
-                        <Icon name="favorite" className="text-[10px] ml-1" />
-                        {item.favorites + (savedListingIds.includes(item.id) ? 1 : 0)}
+                        {savedListingIds.includes(item.id) && <Icon name="favorite" className="text-[10px] ml-1 text-course-red" />}
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
-            </div>
+                </div>
+              </>
+            )}
+            {results.circles.length > 0 && (
+              <>
+                <p className="text-[10px] text-gray-400 font-semibold mb-2">校园圈</p>
+                <div className="space-y-2 mb-4">
+                  {results.circles.map((p) => (
+                    <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-3">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-[10px] font-semibold text-gray-500">{p.is_anonymous ? '匿名同学' : p.nickname}</span>
+                        <span className="text-[10px] text-gray-300">{p.created_at?.substring(0, 10)}</span>
+                      </div>
+                      <p className="text-xs text-on-surface line-clamp-2">{p.content}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>

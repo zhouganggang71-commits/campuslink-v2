@@ -22,6 +22,9 @@ import { registerUploadRoutes } from "./src/server/routes/upload";
 import { registerScheduleRoutes } from "./src/server/routes/schedule";
 import { registerAdminRoutes } from "./src/server/routes/admin";
 import { registerRegistrationRoutes } from "./src/server/routes/registrations";
+import { registerFeedbackRoutes } from "./src/server/routes/feedback";
+import { registerCircleRoutes } from "./src/server/routes/circles";
+import { registerNoticeRoutes } from "./src/server/routes/notices";
 
 // ── 全局错误处理 ──
 installGlobalHandlers();
@@ -38,7 +41,7 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https://images.unsplash.com; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
   next();
 });
 
@@ -173,17 +176,21 @@ app.post("/api/log/client-error", (req: any, res: any) => {
 });
 
 // ── 公开广告接口 ──
-app.get("/api/v1/ads", async (req: any, res: any) => { app.get("/api/ads")(req, res); });
-
-app.get("/api/ads", async (req: any, res: any) => {
+app.get("/api/v1/ads", async (req: any, res: any) => {
   try {
     const [rows]: any = await pool.query(
       "SELECT id, title, image_url, link_url FROM ads WHERE is_active = TRUE AND (start_date IS NULL OR start_date <= CURDATE()) AND (end_date IS NULL OR end_date >= CURDATE()) ORDER BY priority DESC, id DESC LIMIT 5"
     );
-    ok(res, rows);
+    return ok(res, rows);
   } catch (err: any) {
-    logger.error('获取广告失败', { error: err.message, trace_id: (req as any)._traceId });
-    fail(res, 500, "获取广告失败");
+    if (err.errno === 1146) {
+      try {
+        await pool.query("CREATE TABLE IF NOT EXISTS ads (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(200) NOT NULL, image_url VARCHAR(500), link_url VARCHAR(500), position VARCHAR(20) DEFAULT 'banner', is_active BOOLEAN DEFAULT TRUE, priority INT DEFAULT 0, start_date DATE, end_date DATE, views INT DEFAULT 0, clicks INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)");
+      } catch { /* 建表失败静默处理 */ }
+      return ok(res, []);
+    }
+    logger.error('获取广告失败', { error: err.message, trace_id: req._traceId });
+    return ok(res, []);
   }
 });
 
@@ -240,6 +247,9 @@ safeRegister("upload",     () => registerUploadRoutes(app, imageUpload));
 safeRegister("schedule",   () => registerScheduleRoutes(app, pdfUpload, imageUpload));
 safeRegister("admin",      () => registerAdminRoutes(app, pool));
 safeRegister("registrations", () => registerRegistrationRoutes(app, pool));
+safeRegister("feedback",      () => registerFeedbackRoutes(app, pool));
+safeRegister("circles",       () => registerCircleRoutes(app, pool));
+safeRegister("notices",       () => registerNoticeRoutes(app, pool));
 
 // ── 全局错误处理 ──
 app.use((err: any, req: any, res: any, next: any) => {
@@ -308,7 +318,11 @@ async function runMigrations() {
     logger.info(`执行迁移: ${file}`);
     const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
     for (const stmt of statements) {
-      await pool.query(stmt);
+      try {
+        await pool.query(stmt);
+      } catch (stmtErr: any) {
+        logger.warn(`迁移语句失败（跳过继续）: ${file}`, { error: stmtErr.message, sql: stmt.slice(0, 80) });
+      }
     }
     currentBatch++;
     await pool.query("INSERT INTO _migrations (name, batch) VALUES (?, ?)", [file, currentBatch]);

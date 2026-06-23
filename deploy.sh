@@ -18,7 +18,9 @@ echo "  SRV: $(wc -c < dist/server.cjs | tr -d ' ') bytes"
 
 # ── 2/6 上传代码 ──
 echo "=== 2/6 上传 ==="
-scp dist/assets/* dist/index.html dist/server.cjs dist/admin.html dist/disclaimer.html "$N100:$DIR/" 2>/dev/null
+scp dist/assets/* dist/index.html dist/server.cjs dist/admin.html dist/disclaimer.html dist/logo.png "$N100:$DIR/" 2>/dev/null
+# 上传 PWA 文件（manifest + service worker + 图标）
+scp dist/sw.js dist/registerSW.js dist/workbox-*.js dist/manifest.webmanifest dist/pwa-*.png "$N100:$DIR/" 2>/dev/null
 # 同步 package 文件（依赖变了自动装）
 scp package.json package-lock.json "$N100:$APP/"
 # 同步 .env（仅首次）
@@ -56,9 +58,10 @@ ssh "$N100" "
 echo "=== 5/6 部署 ==="
 ssh "$N100" "
   cd $DIR
+  # 首页资源移入 assets/，PWA 文件（sw.js/registerSW.js/workbox-*.js）保留在根目录
   rm -rf assets
   mkdir assets
-  mv *.js *.css assets/ 2>/dev/null
+  mv index-*.js index-*.css assets/ 2>/dev/null
   pm2 restart campuslink
   sleep 2
 "

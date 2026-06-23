@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { Listing } from '../../types';
 import { useRegistrations } from '../../utils/regContext';
 import Icon from '../ui/Icon';
+import Button from '../ui/Button';
 
 export default function RegisterPanel({
   listing,
@@ -70,7 +71,7 @@ export default function RegisterPanel({
       </div>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center animate-fade-in">
-          <div onClick={() => setIsOpen(false)} className="absolute inset-0 bg-black/40"></div>
+          <div onClick={() => setIsOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity"></div>
           <div className="relative bg-white w-full max-w-lg rounded-t-[20px] shadow-2xl z-10 px-6 py-6 overflow-y-auto max-h-[80vh]">
             <h3 className="font-headline text-lg font-bold mb-4">活动报名 — {listing.title}</h3>
             <div className="space-y-3">
@@ -101,19 +102,12 @@ export default function RegisterPanel({
               />
             </div>
             <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setIsOpen(false)}
-                className="flex-1 py-3 text-sm font-semibold rounded-lg border border-gray-200 text-gray-600"
-              >
+              <Button variant="secondary" size="sm" block onClick={() => setIsOpen(false)}>
                 取消
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={!form.name || !form.phone}
-                className="flex-1 py-3 text-sm font-semibold rounded-lg bg-primary text-white disabled:opacity-40"
-              >
+              </Button>
+              <Button variant="primary" size="sm" block onClick={handleSubmit} disabled={!form.name || !form.phone}>
                 确认报名
-              </button>
+              </Button>
             </div>
             <p className="text-[10px] text-gray-400 text-center mt-3">提交后发布者将在报名库中看到你的信息</p>
           </div>

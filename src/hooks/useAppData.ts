@@ -1,9 +1,9 @@
 /**
  * 数据层 — 所有 state、localStorage、服务端数据拉取、计算属性
  */
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Listing, Course, Message, StudentProfile } from '../types';
-import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_MESSAGES, INITIAL_NOTICES } from '../data';
+import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_NOTICES } from '../data';
 import { api, getToken } from '../utils/api';
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -41,10 +41,18 @@ export function useAppData() {
 
   const [activeTab, setActiveTab] = useState('home');
   const [listings, setListings] = useState<Listing[]>(() => loadFromStorage('listings', INITIAL_LISTINGS));
+  const [listPage, setListPage] = useState(1);
+  const [listHasMore, setListHasMore] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('courses', INITIAL_COURSES));
-  const [messages, setMessages] = useState<Message[]>(() => loadFromStorage('messages', INITIAL_MESSAGES));
+  const [messages, setMessages] = useState<Message[]>(() => loadFromStorage('messages', []));
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
-  const [savedListingIds, setSavedListingIds] = useState<string[]>(() => loadFromStorage('saved', ['headphones-1']));
+  const [savedListingIds, setSavedListingIds] = useState<string[]>(() => {
+    const raw = loadFromStorage('saved', []);
+    // 清除 mock 数据 ID（非数字），防止触发服务端外键异常
+    return raw.filter((id: string) => /^\d+$/.test(id));
+  });
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [selectedPostType, setSelectedPostType] = useState('all');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
@@ -121,12 +129,16 @@ export function useAppData() {
       })
       .catch(() => {});
   };
-  const syncPosts = () => {
+  const syncPosts = (page = 1, append = false) => {
+    if (listLoading) return;
+    setListLoading(true);
+    const params = new URLSearchParams({ page: String(page), limit: '20' });
+    if (selectedPostType !== 'all') params.set('type', selectedPostType);
     api
-      .get<{ list: any[] }>('/posts')
+      .get<{ list: any[]; total: number }>(`/posts?${params}`)
       .then((res) => {
-        if (res.code === 0 && res.data?.list) {
-          const serverListings = res.data.list.map(
+        if (res.code === 0 && res.data) {
+          const serverListings = (res.data.list || []).map(
             (p: any) =>
               ({
                 id: String(p.id),
@@ -134,7 +146,7 @@ export function useAppData() {
                 price: p.price,
                 originalPrice: p.original_price,
                 description: p.description,
-                imageUrls: p.image_urls ? JSON.parse(p.image_urls) : [],
+                imageUrls: Array.isArray(p.image_urls) ? p.image_urls : (p.image_urls ? JSON.parse(p.image_urls) : []),
                 category: p.category,
                 postType: p.post_type,
                 publisherName: p.publisher_name || p.nickname || '',
@@ -150,20 +162,119 @@ export function useAppData() {
                 status: p.status || 'active',
               }) as Listing,
           );
-          setListings(serverListings);
+          setListings(prev => append ? [...prev, ...serverListings] : serverListings);
+          setListHasMore(serverListings.length >= 20);
+          setListPage(page);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setListLoading(false);
+        setListRefreshing(false);
+      });
+  };
+
+  const refreshPosts = () => {
+    setListRefreshing(true);
+    syncPosts(1, false);
+  };
+
+  const loadMorePosts = () => {
+    if (listHasMore && !listLoading) syncPosts(listPage + 1, true);
+  };
+  const syncFavorites = () => {
+    if (!profile.studentId) return;
+    api
+      .get<any[]>('/favorites')
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data)) {
+          const ids = res.data.map((p: any) => String(p.id));
+          setSavedListingIds(ids);
         }
       })
       .catch(() => {});
   };
+
+  // ── 相对时间格式化 ──
+  const formatRelativeTime = (dateStr: string): string => {
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffHour = Math.floor(diffMs / 3600000);
+      const diffDay = Math.floor(diffMs / 86400000);
+
+      if (diffMin < 1) return '刚刚';
+      if (diffMin < 60) return `${diffMin}分钟前`;
+      if (diffHour < 24) return `${diffHour}小时前`;
+      if (diffDay === 1) return '昨天';
+      if (diffDay < 7) {
+        const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        return weekdays[date.getDay()];
+      }
+      return `${date.getMonth() + 1}月${date.getDate()}日`;
+    } catch {
+      return dateStr;
+    }
+  };
+
+  // ── 从 notices API 推导消息状态 ──
+  const deriveStatus = (title: string, category: string): Message['status'] => {
+    if (category === 'approval') {
+      if (title.includes('通过')) return 'approved';
+      if (title.includes('打回') || title.includes('退回')) return 'rejected';
+      if (title.includes('报名')) return 'event';
+    }
+    if (category === 'official') {
+      if (title.includes('活动') || title.includes('音乐节')) return 'event';
+      return 'update';
+    }
+    return 'update';
+  };
+
+  const syncMessages = useCallback(() => {
+    if (!getToken()) return;
+    api
+      .get<any[]>('/notices')
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data)) {
+          const serverMessages: Message[] = res.data.map((n: any) => ({
+            id: String(n.id),
+            title: n.title || '',
+            content: n.content || '',
+            timeText: formatRelativeTime(n.created_at),
+            category: (n.category === 'approval' ? 'approval' : 'official') as Message['category'],
+            status: deriveStatus(n.title || '', n.category || 'official'),
+            isRead: !!n.is_read,
+          }));
+          setMessages(serverMessages);
+        }
+      })
+      .catch(() => {});
+  }, []);
   // 挂载：无缓存才拉服务端
   useEffect(() => {
+    if (!getToken()) return;
     const cached: any = loadFromStorage('courses', []);
     if (!cached || !cached.length) syncCourses();
-  }, []);
+  }, [profile.studentId]);
   useEffect(() => {
-    const cached: any = loadFromStorage('posts', []);
-    if (!cached || !cached.length) syncPosts();
-  }, []);
+    if (!getToken()) return;
+    const cached: any = loadFromStorage('listings', []);
+    if (!cached || !cached.length) syncPosts(1, false);
+  }, [profile.studentId]);
+  // 挂载：收藏始终从服务端同步（服务端是权威数据源）
+  useEffect(() => {
+    if (!profile.studentId) return;
+    syncFavorites();
+  }, [profile.studentId]);
+  // 挂载：消息从服务端同步（服务端是权威数据源）
+  useEffect(() => {
+    if (!profile.studentId) return;
+    syncMessages();
+  }, [profile.studentId, syncMessages]);
 
   // ── localStorage 持久化（合并为一次写入，避免连续触发多次 setItem）──
   useEffect(() => {
@@ -206,6 +317,11 @@ export function useAppData() {
     setCourses,
     messages,
     setMessages,
+    listLoading,
+    listRefreshing,
+    listHasMore,
+    refreshPosts,
+    loadMorePosts,
     selectedListing,
     setSelectedListing,
     savedListingIds,
@@ -244,5 +360,7 @@ export function useAppData() {
     savedCount,
     syncCourses,
     syncPosts,
+    syncFavorites,
+    syncMessages,
   };
 }

@@ -1,6 +1,64 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect, useRef, useCallback } from 'react';
 import { Listing, ORGANIZATIONS } from '../../types';
+import { api } from '../../utils/api';
 import Icon from '../ui/Icon';
+
+// ── 草稿持久化 ──
+const DRAFT_KEY = 'campuslink_publish_draft';
+
+function loadDraft(): Record<string, string> | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // 至少有一条实质内容才算有效草稿
+    if (parsed.title || parsed.description || parsed.imageUrl) return parsed;
+    return null;
+  } catch { return null; }
+}
+
+function saveDraft(form: Record<string, string>) {
+  try {
+    // 只有有实质内容才存，避免空表单覆盖有效草稿
+    if (form.title || form.description || form.imageUrl) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    }
+  } catch { /* localStorage 不可用时静默 */ }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch {}
+}
+
+// ── 简易 debounce（零依赖） ──
+function useDebounce<T extends (...args: any[]) => void>(fn: T, delay: number): T & { flush: () => void } {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const lastArgsRef = useRef<any[] | null>(null);
+
+  const debounced = useCallback((...args: any[]) => {
+    lastArgsRef.current = args;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      fnRef.current(...(lastArgsRef.current || []));
+      lastArgsRef.current = null;
+    }, delay);
+  }, [delay]) as any;
+
+  debounced.flush = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      if (lastArgsRef.current) {
+        fnRef.current(...lastArgsRef.current);
+        lastArgsRef.current = null;
+      }
+    }
+  }, []);
+
+  return debounced;
+}
 
 const POST_TYPES: { key: Listing['postType']; label: string; icon: string; locked?: boolean; lockMsg?: string }[] = [
   { key: 'sell', label: '二手', icon: 'shopping_bag' },
@@ -26,30 +84,36 @@ interface PublishTabProps {
 }
 
 export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, editListing }: PublishTabProps) {
+  const DEFAULT_FORM: Record<string, string> = {
+    postType: 'sell',
+    title: '',
+    description: '',
+    price: '',
+    originalPrice: '',
+    contactInfo: '',
+    imageUrl: '',
+    category: '数码电器',
+    departFrom: '',
+    arriveTo: '',
+    departTime: '',
+    seats: '2',
+    jobType: '校内勤工',
+    salary: '',
+    workTime: '',
+    activityTime: '',
+    activityLocation: '',
+    activityOrg: '校学生会',
+    studyType: '找搭子',
+    targetCount: '2',
+  };
+
   const buildInitial = (): Record<string, string> => {
-    if (!editListing)
-      return {
-        postType: 'sell',
-        title: '',
-        description: '',
-        price: '',
-        originalPrice: '',
-        contactInfo: '',
-        imageUrl: '',
-        category: '数码电器',
-        departFrom: '',
-        arriveTo: '',
-        departTime: '',
-        seats: '2',
-        jobType: '校内勤工',
-        salary: '',
-        workTime: '',
-        activityTime: '',
-        activityLocation: '',
-        activityOrg: '校学生会',
-        studyType: '找搭子',
-        targetCount: '2',
-      };
+    if (!editListing) {
+      // 尝试恢复草稿（编辑模式下不使用草稿）
+      const draft = loadDraft();
+      if (draft) return draft;
+      return { ...DEFAULT_FORM };
+    }
     // 从 editListing 提取字段
     const desc = editListing.description || '';
     const extractDesc = (prefix: string): string => {
@@ -82,9 +146,40 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
   };
 
   const [form, setForm] = useState<Record<string, string>>(buildInitial);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(() => !!loadDraft() && !editListing);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const update = (updates: Record<string, string>) => setForm((prev) => ({ ...prev, ...updates }));
   const ft = (key: string) => form[key] || '';
+
+  // ── 草稿自动保存（debounce 2 秒） ──
+  const debouncedSave = useDebounce((f: Record<string, string>) => saveDraft(f), 2000);
+
+  useEffect(() => {
+    if (!editListing) debouncedSave(form);
+    return () => debouncedSave.flush();
+  }, [form, editListing, debouncedSave]);
+
+  // ── 图片上传 ──
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > 10 * 1024 * 1024) return;
+
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.upload<{ url: string }>('/upload', formData);
+      if (res.code === 0 && res.data?.url) {
+        update({ imageUrl: res.data.url });
+      }
+    } catch { /* 静默，保留 URL 输入作为降级 */ }
+    setUploadingImage(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -154,29 +249,30 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
       status: 'active',
     });
 
-    // Reset form
-    setForm({
-      postType: 'sell',
-      title: '',
-      description: '',
-      price: '',
-      originalPrice: '',
-      contactInfo: '',
-      imageUrl: '',
-      category: '数码电器',
-      departFrom: '',
-      arriveTo: '',
-      departTime: '',
-      seats: '2',
-      jobType: '校内勤工',
-      salary: '',
-      workTime: '',
-      activityTime: '',
-      activityLocation: '',
-      activityOrg: '',
-      studyType: '找搭子',
-      targetCount: '2',
-    });
+    // 清除草稿
+    clearDraft();
+
+    // Reset form — 保留 postType 和类型相关字段，方便连续发布同类型
+    const keepFields = typeKeepFields[pt] || [];
+    const resetForm: Record<string, string> = { ...DEFAULT_FORM };
+    // 保留 postType
+    resetForm.postType = pt;
+    // 保留类型特定字段（如 departFrom, arriveTo 等）
+    for (const f of keepFields) {
+      if (f in form) resetForm[f] = form[f];
+    }
+    setForm(resetForm);
+  };
+
+  // 各类型保留字段（发布后不清空，方便连续发布）
+  const typeKeepFields: Record<string, string[]> = {
+    sell: ['category'],
+    lost: ['departFrom'],
+    found: ['departFrom'],
+    carpool: ['departFrom', 'arriveTo', 'seats'],
+    job: ['jobType', 'salary', 'workTime'],
+    activity: ['activityOrg', 'activityTime', 'activityLocation'],
+    study: ['studyType', 'targetCount'],
   };
 
   const pt = ft('postType') as Listing['postType'];
@@ -214,6 +310,22 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
             })}
           </div>
         </div>
+
+        {/* ===== 草稿恢复提示 ===== */}
+        {showDraftPrompt && (
+          <div className="flex items-center justify-between bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Icon name="schedule" className="text-primary text-base" />
+              <span className="text-xs font-semibold text-primary">检测到未发布的草稿</span>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { clearDraft(); setForm({ ...DEFAULT_FORM }); setShowDraftPrompt(false); }}
+                className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer px-2 py-1">丢弃</button>
+              <button type="button" onClick={() => setShowDraftPrompt(false)}
+                className="text-[10px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-3 py-1 cursor-pointer">继续编辑</button>
+            </div>
+          </div>
+        )}
 
         {/* ===== 活动锁定提示 ===== */}
         {activityLocked && (
@@ -529,16 +641,45 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
           </>
         )}
 
-        {/* ===== 通用字段 ===== */}
+        {/* ===== 图片上传 ===== */}
         <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">图片链接 (可选)</label>
-          <input
-            type="url"
-            placeholder="粘贴图片地址"
-            value={ft('imageUrl')}
-            onChange={(e) => update({ imageUrl: e.target.value })}
-            className="w-full bg-gray-50 text-[13px] border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/10 rounded-xl p-3 focus:outline-none transition-all"
-          />
+          <label className="block text-xs font-bold text-gray-600 mb-1">图片 (可选)</label>
+          {ft('imageUrl') ? (
+            <div className="relative w-32 h-32 rounded-xl overflow-hidden bg-slate-100 border border-gray-200">
+              <img src={ft('imageUrl')} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <button type="button" onClick={() => update({ imageUrl: '' })}
+                className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center cursor-pointer transition-colors"
+                aria-label="移除图片">
+                <Icon name="close" className="text-white text-xs" />
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className={`flex flex-col items-center justify-center gap-2 py-6 border-2 border-dashed rounded-xl cursor-pointer transition-colors
+                  ${uploadingImage ? 'border-primary/30 bg-primary/5' : 'border-gray-300 bg-gray-50 hover:border-primary/50 hover:bg-primary/5'}`}
+              >
+                {uploadingImage ? (
+                  <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                ) : (
+                  <Icon name="add_a_photo" className="text-2xl text-gray-400" />
+                )}
+                <span className="text-xs text-gray-400">{uploadingImage ? '上传中...' : '点击上传图片（支持 JPG/PNG/WebP，最大 10MB）'}</span>
+              </div>
+              <details className="group">
+                <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600 select-none">或粘贴图片链接</summary>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={ft('imageUrl')}
+                  onChange={(e) => update({ imageUrl: e.target.value })}
+                  className="mt-1.5 w-full bg-gray-50 text-[13px] border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/10 rounded-xl p-3 focus:outline-none transition-all"
+                />
+              </details>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
         </div>
 
         <div>
@@ -566,7 +707,7 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
         <div className="pt-2 flex gap-3">
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => { clearDraft(); onCancel(); }}
             className="flex-1 py-2.5 bg-slate-100 text-gray-600 font-semibold text-xs rounded-lg active:scale-95 cursor-pointer"
           >
             取消

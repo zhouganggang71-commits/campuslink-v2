@@ -17,6 +17,18 @@ function decryptPost(p: any) {
 }
 
 export function registerPostRoutes(app: any, pool: Pool) {
+  // 每6小时自动回收超过7天的帖子
+  setInterval(async () => {
+    try {
+      const [result]: any = await pool.query(
+        "UPDATE posts SET status = 'closed' WHERE status = 'active' AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)"
+      );
+      if (result.affectedRows > 0) {
+        logger.business('帖子自动回收', { count: result.affectedRows });
+      }
+    } catch { /* 静默 */ }
+  }, 6 * 60 * 60 * 1000);
+
   // 列表
   app.get('/api/v1/posts', async (req: Request, res: Response) => {
     try {
@@ -27,7 +39,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const sort = (req.query.sort as string) || 'default';
       const keyword = (req.query.keyword as string) || '';
 
-      let where = "WHERE status = 'active'";
+      let where = "WHERE status = 'active' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
       const params: any[] = [];
       if (postType && postType !== 'all') {
         where += ' AND post_type = ?';
@@ -180,7 +192,12 @@ export function registerPostRoutes(app: any, pool: Pool) {
   // 收藏（切换）
   app.post('/api/v1/favorites/:postId', auth, limiter(10), async (req: Request, res: Response) => {
     try {
-      const postId = req.params.postId;
+      if (!req.isVerified) return fail(res, 403, '账号待审核，审核通过后才能收藏');
+      const postId = String(req.params.postId);
+      // 仅允许数字 ID（真实帖子 ID 为自增整数，防止 mock 数据 ID 如 headphones-1 触发外键异常）
+      if (!/^\d+$/.test(postId)) {
+        return fail(res, 400, '无效的帖子ID');
+      }
       const [existing]: any = await pool.query('SELECT id FROM favorites WHERE user_id = ? AND post_id = ?', [
         req.userId,
         postId,
@@ -211,6 +228,19 @@ export function registerPostRoutes(app: any, pool: Pool) {
     } catch (err: any) {
       logger.error('获取收藏失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
       fail(res, 500, '获取收藏失败');
+    }
+  });
+
+  // ── 分类列表 ──
+  app.get('/api/v1/categories', async (req: Request, res: Response) => {
+    try {
+      const [rows]: any = await pool.query(
+        'SELECT id, name, parent_id, sort_order FROM categories WHERE is_active = TRUE ORDER BY sort_order'
+      );
+      ok(res, rows);
+    } catch (err: any) {
+      logger.error('获取分类失败', { error: err.message, trace_id: (req as any)._traceId });
+      fail(res, 500, '获取分类失败');
     }
   });
 }

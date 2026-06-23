@@ -46,56 +46,68 @@ export function RegistrationProvider({ children }: { children: React.ReactNode }
   const [registrations, setRegistrations] = useState<Registration[]>(() => load('regs', []));
   const [myRegIds, setMyRegIds] = useState<Set<string>>(() => new Set(load<string[]>('myRegIds', [])));
 
-  // 从后端加载
-  useEffect(() => {
-    if (!getToken()) return;
-    api
-      .get<{ joined: any[]; mine: any[] }>('/registrations')
-      .then((res) => {
-        if (res.code === 0 && res.data) {
-          const joined = (res.data.joined || []).map(
-            (r: any) =>
-              ({
-                id: String(r.id),
-                listingId: String(r.listing_id),
-                listingTitle: r.listing_title,
-                registrantName: r.registrant_name,
-                studentId: r.student_id,
-                department: r.department || '',
-                phone: r.phone,
-                registeredAt: r.created_at?.substring(0, 16) || '',
-              }) as Registration,
-          );
-          const mine = (res.data.mine || []).map(
-            (r: any) =>
-              ({
-                id: String(r.id),
-                listingId: String(r.listing_id),
-                listingTitle: r.listing_title,
-                registrantName: r.registrant_name,
-                studentId: r.student_id,
-                department: r.department || '',
-                phone: r.phone,
-                registeredAt: r.created_at?.substring(0, 16) || '',
-              }) as Registration,
-          );
-          const all = [...joined, ...mine];
-          // joined 里的都是我报名的
-          if (joined.length)
-            setMyRegIds((prev) => {
-              const next = new Set(prev);
-              joined.forEach((r) => next.add(r.id));
-              return next;
-            });
-          if (all.length)
-            setRegistrations((prev) => {
-              const existing = new Set(prev.map((r) => r.id));
-              return [...all.filter((r) => !existing.has(r.id)), ...prev];
-            });
-        }
-      })
-      .catch(() => {});
+  // 从后端加载（仅已登录用户）
+  const syncRegistrations = useCallback(async () => {
+    const t = getToken();
+    if (!t) return;
+    // 二次确认：profile 中有学号才说明真正登录过，避免过期 token 触发 401
+    try {
+      const raw = localStorage.getItem('campuslink_profile');
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p.studentId) return;
+    } catch { return; }
+    try {
+      const res = await api.get<{ joined: any[]; mine: any[] }>('/registrations');
+      if (res.code === 0 && res.data) {
+        const joined = (res.data.joined || []).map(
+          (r: any) =>
+            ({
+              id: String(r.id),
+              listingId: String(r.listing_id),
+              listingTitle: r.listing_title,
+              registrantName: r.registrant_name,
+              studentId: r.student_id,
+              department: r.department || '',
+              phone: r.phone,
+              registeredAt: r.created_at?.substring(0, 16) || '',
+            }) as Registration,
+        );
+        const mine = (res.data.mine || []).map(
+          (r: any) =>
+            ({
+              id: String(r.id),
+              listingId: String(r.listing_id),
+              listingTitle: r.listing_title,
+              registrantName: r.registrant_name,
+              studentId: r.student_id,
+              department: r.department || '',
+              phone: r.phone,
+              registeredAt: r.created_at?.substring(0, 16) || '',
+            }) as Registration,
+        );
+        const all = [...joined, ...mine];
+        if (joined.length)
+          setMyRegIds((prev) => {
+            const next = new Set(prev);
+            joined.forEach((r) => next.add(r.id));
+            return next;
+          });
+        if (all.length)
+          setRegistrations((prev) => {
+            const existing = new Set(prev.map((r) => r.id));
+            return [...all.filter((r) => !existing.has(r.id)), ...prev];
+          });
+      }
+    } catch { /* noop */ }
   }, []);
+
+  // 初始化加载（仅首次）
+  useEffect(() => {
+    const raw = localStorage.getItem('campuslink_regs');
+    if (raw) return; // 已有缓存，跳过
+    syncRegistrations();
+  }, [syncRegistrations]);
 
   useEffect(() => {
     save('regs', registrations);

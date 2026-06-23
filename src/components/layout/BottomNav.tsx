@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import Icon from '../ui/Icon';
 interface BottomNavProps {
   activeTab: string;
@@ -10,11 +11,11 @@ const TABS = [
   { key: 'home', icon: 'home', label: '首页' },
   { key: 'schedule', icon: 'calendar_month', label: '课表' },
   { key: 'publish', icon: 'add_circle', label: '发布', special: true },
-  { key: 'messages', icon: 'chat', label: '消息' },
+  { key: 'circles', icon: 'group', label: '校园圈' },
   { key: 'profile', icon: 'person', label: '我的' },
 ];
 
-export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSelectedListing }: BottomNavProps) {
+export default memo(function BottomNav({ activeTab, setActiveTab, unreadCount, setSelectedListing }: BottomNavProps) {
   return (
     <nav className="fixed bottom-0 left-0 w-full z-40 bg-white border-t border-gray-100 shadow-[0px_-4px_12px_rgba(0,0,0,0.05)] py-2 pb-safe flex justify-around items-center max-w-lg mx-auto right-0">
       {TABS.map((item) => {
@@ -47,4 +48,4 @@ export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSel
       })}
     </nav>
   );
-}
+});

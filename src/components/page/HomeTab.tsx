@@ -1,6 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Listing, Notice, DEPARTMENTS } from '../../types';
 import Icon from '../ui/Icon';
+import PostCard from './PostCard';
+import AdBanner from './AdBanner';
+import Button from '../ui/Button';
+import { CardSkeleton } from '../ui/Skeleton';
+import ScrollToTop from '../ui/ScrollToTop';
 
 const CHANNELS: { key: Listing['postType'] | 'all'; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: 'apps' },
@@ -16,16 +21,6 @@ const CHANNELS: { key: Listing['postType'] | 'all'; label: string; icon: string 
 function postTypeLabel(pt: string) {
   return CHANNELS.find((p) => p.key === pt)?.label || pt;
 }
-function timeAgo(ts: string) {
-  const diff = Date.now() - new Date(ts).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
-  return ts?.substring(0, 10) || '';
-}
-
 interface HomeTabProps {
   listings: Listing[];
   notices: Notice[];
@@ -35,6 +30,11 @@ interface HomeTabProps {
   openListingDetails: (l: Listing) => void;
   onPublishTab: () => void;
   onOpenSearch: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loading: boolean;
 }
 
 export default function HomeTab({
@@ -45,8 +45,57 @@ export default function HomeTab({
   openListingDetails,
   onPublishTab,
   onOpenSearch,
+  onRefresh,
+  refreshing,
+  onLoadMore,
+  hasMore,
+  loading,
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ── 下拉刷新 ──
+  const [pullDistance, setPullDistance] = useState(0);
+  const touchStartY = useRef(0);
+  const isPulling = useRef(false);
+  const PULL_THRESHOLD = 60;
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (scrollRef.current && scrollRef.current.scrollTop <= 0) {
+      touchStartY.current = e.touches[0].clientY;
+      isPulling.current = true;
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!isPulling.current || refreshing) return;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    if (dy > 0) {
+      setPullDistance(Math.min(dy * 0.4, 80));
+    }
+  }, [refreshing]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (pullDistance >= PULL_THRESHOLD && !refreshing) {
+      onRefresh();
+    }
+    setPullDistance(0);
+    isPulling.current = false;
+  }, [pullDistance, refreshing, onRefresh]);
+
+  // ── 滚动触底加载更多 ──
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && hasMore && !loading) {
+        onLoadMore();
+      }
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [hasMore, loading, onLoadMore]);
+
   const activities = useMemo(
     () => listings.filter((l) => l.postType === 'activity' && l.status === 'active').slice(0, 6),
     [listings],
@@ -61,8 +110,26 @@ export default function HomeTab({
     [listings, selectedPostType, selectedDept],
   );
 
+  // 初始加载骨架屏
+  const showInitialSkeleton = loading && !refreshing && listings.length === 0;
+
   return (
-    <div className="flex flex-col animate-fade-in">
+    <div
+      ref={scrollRef}
+      className="flex flex-col animate-fade-in overflow-y-auto flex-1"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* ── 下拉刷新指示器 ── */}
+      <div
+        className="flex items-center justify-center transition-all duration-200 overflow-hidden"
+        style={{ height: pullDistance, opacity: pullDistance / PULL_THRESHOLD }}
+      >
+        <div className={`w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full ${refreshing ? 'animate-spin' : ''}`}
+          style={{ transform: `rotate(${pullDistance * 3}deg)` }} />
+      </div>
+
       <div className="p-4 flex flex-col gap-3">
         {/* 搜索栏 */}
         <div className="relative w-full">
@@ -152,58 +219,50 @@ export default function HomeTab({
           </div>
         )}
 
-        {/* 帖子列表 */}
-        {filtered.length === 0 ? (
+        {/* 广告 Banner */}
+        <AdBanner />
+
+        {/* ── 初始加载骨架屏 ── */}
+        {showInitialSkeleton && (
+          <div className="flex flex-col gap-2.5">
+            {[1, 2, 3, 4].map((i) => (
+              <CardSkeleton key={i} />
+            ))}
+          </div>
+        )}
+
+        {/* ── 帖子列表 ── */}
+        {!showInitialSkeleton && filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-slate-50 rounded-2xl border border-dashed border-gray-200">
             <Icon name="inbox" className="text-4xl mb-2 opacity-60" />
             <p className="text-xs font-semibold text-gray-500">暂无内容</p>
-            <button
-              onClick={onPublishTab}
-              className="mt-3 bg-primary text-white text-xs font-semibold px-4 py-2 rounded-lg active:scale-95 cursor-pointer"
-            >
-              去发布
-            </button>
+            <Button variant="primary" size="sm" onClick={onPublishTab}>去发布</Button>
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
             {filtered.map((item) => (
-              <div
+              <PostCard
                 key={item.id}
+                listing={item}
+                postTypeLabel={postTypeLabel}
                 onClick={() => openListingDetails(item)}
-                className="bg-white border border-gray-50 rounded-xl p-3.5 cursor-pointer hover:shadow-sm transition-all active:scale-[0.99]"
-              >
-                <div className="flex items-start gap-3">
-                  {item.imageUrls.length > 0 && (
-                    <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-slate-100">
-                      <img src={item.imageUrls[0]} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                        {postTypeLabel(item.postType)}
-                      </span>
-                      {item.isOfficialOrg && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                          官方
-                        </span>
-                      )}
-                      {item.price && <span className="text-course-red font-bold ml-auto">¥{item.price}</span>}
-                    </div>
-                    <h3 className="text-sm font-semibold text-on-surface truncate">{item.title}</h3>
-                    <p className="text-xs text-on-surface-variant mt-1 line-clamp-1">{item.description}</p>
-                    <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-400">
-                      <span>{item.publisherName}</span>
-                      <span>{timeAgo(item.publishedTimeText)}</span>
-                      <span>{item.views} 次浏览</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              />
             ))}
           </div>
         )}
+
+        {/* ── 加载更多指示器 ── */}
+        {loading && !refreshing && listings.length > 0 && (
+          <div className="flex items-center justify-center py-3 gap-2">
+            <div className="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+            <span className="text-[10px] text-gray-400">加载中...</span>
+          </div>
+        )}
+        {!hasMore && listings.length > 0 && (
+          <div className="text-center py-4 text-[10px] text-gray-400">— 已加载全部 —</div>
+        )}
       </div>
+      <ScrollToTop containerRef={scrollRef} />
     </div>
   );
 }

@@ -87,6 +87,11 @@ function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2500)}
 function enc(s){return s&&s.length>20?'<span class="enc" title="已解密: '+esc(s)+'">'+esc(s.slice(0,8)+'...')+'</span>':esc(s||'-')}
 
+// ── 加载 ──
+const TABS=['overview','posts','users','courses','registrations','favorites','tokens'];
+const TAB_LABELS={overview:'总览',posts:'帖子',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌'};
+let curTab='overview';
+
 // ── 自动登录 ──
 (function(){
   const k = sessionStorage.getItem('admin_key');
@@ -102,11 +107,6 @@ function login(){
   }).catch(()=>{document.getElementById('loginError').textContent='密钥错误'});
 }
 function logout(){sessionStorage.removeItem('admin_key');KEY='';document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden')}
-
-// ── 加载 ──
-const TABS=['overview','posts','users','courses','registrations','favorites','tokens'];
-const TAB_LABELS={overview:'总览',posts:'帖子',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌'};
-let curTab='overview';
 
 function load(){
   api('/stats').then(r=>r.json()).then(d=>{
@@ -167,26 +167,53 @@ function fetchPosts(){
 
 // ── 用户 ──
 let userFilter='all';
+function actionBtns(u){
+  if(u.auth_status==='pending') return `<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">通过</button><button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'rejected'})">拒绝</button>`;
+  if(u.auth_status==='verified'||u.auth_status==='org_verified') return `<button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'pending'})">撤销</button>`;
+  return `<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">恢复</button>`;
+}
 function fetchUsers(){
   api('/users'+(userFilter!=='all'?'?status='+userFilter:'')).then(r=>r.json()).then(d=>{
     const list=d.data||[];
-    let h=`<div class="filter">${['all','pending','verified'].map(s=>`<button class="${userFilter===s?'on':''}" onclick="userFilter='${s}';fetchUsers()">${s==='all'?'全部':s==='pending'?'待审核':'已通过'}</button>`).join('')}</div>`;
+    var h = '<div class="filter">';
+    ['all','pending','verified','org_verified'].forEach(function(s){
+      var labels = {all:'全部',pending:'待审核',verified:'已认证',org_verified:'组织'};
+      h += '<button class="' + (userFilter===s?'on':'') + '" onclick="userFilter=\'' + s + '\';fetchUsers()">' + (labels[s]||s) + '</button>';
+    });
+    h += '</div>';
     if(!list.length){h+='<div class="empty">暂无</div>'}else{
-      h+=`<table><tr><th>ID</th><th>姓名</th><th>学号</th><th>状态</th><th>管理员</th><th>注册时间</th><th>操作</th></tr>`;
-      list.forEach(u=>{h+=`<tr><td>${u.id}</td><td>${esc(u.nickname)}</td><td>${esc(u.student_id)}</td><td><span class="tag ${u.auth_status}">${u.auth_status}</span></td><td>${u.is_admin?'✅':''}</td><td>${(u.created_at||'').slice(0,10)}</td><td>${u.auth_status==='pending'?`<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">通过</button><button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'rejected'})">拒绝</button>`:u.auth_status==='verified'?`<button class="btn-sm btn-no" onclick="act('users/${u.id}',{auth_status:'pending'})">撤销</button>`:`<button class="btn-sm btn-ok" onclick="act('users/${u.id}',{auth_status:'verified'})">恢复</button>`}</td></tr>`});
+      h+='<table><tr><th>ID</th><th>姓名</th><th>学号</th><th>组织</th><th>状态</th><th>管理员</th><th>注册时间</th><th>操作</th></tr>';
+      list.forEach(function(u){
+        h+='<tr><td>'+u.id+'</td><td>'+esc(u.nickname)+'</td><td>'+esc(u.student_id)+'</td><td>'+esc(u.org_level||'')+' '+esc(u.position||'')+'</td><td><span class=\"tag '+u.auth_status+'\">'+u.auth_status+'</span></td><td>'+(u.is_admin?'✅':'')+'</td><td>'+(u.created_at||'').slice(0,10)+'</td><td>'+actionBtns(u)+'</td></tr>';
+      });
       h+='</table>';
     }
     document.getElementById('panel').innerHTML=h;
   });
 }
 
-// ── 课表 ──
+// ── 课表（按用户分组）──
+let courseUserId = '';
 function fetchCourses(){
-  api('/courses?limit=100').then(r=>r.json()).then(d=>{
-    const list=d.data?.list||[];
+  if(courseUserId){
+    api('/courses?user_id='+courseUserId).then(r=>r.json()).then(d=>{
+      const list=d.data?.courses||[];
+      let h=`<button onclick="courseUserId='';fetchCourses()" style="margin-bottom:8px;font-size:12px;cursor:pointer;background:#e2e8f0;border:none;padding:5px 12px;border-radius:8px">← 返回用户列表</button>`;
+      if(!list.length){h+='<div class="empty">该用户暂无课表</div>'}else{
+        h+=`<table><tr><th>课程</th><th>教师</th><th>教室</th><th>周几</th><th>节次</th><th>周次</th></tr>`;
+        const dayMap=['','一','二','三','四','五','六','日'];
+        list.forEach(c=>{h+=`<tr><td>${esc(c.name)}</td><td>${esc(c.teacher||'')}</td><td>${esc(c.classroom||'')}</td><td>周${dayMap[c.weekday]||c.weekday}</td><td>${c.start_period}-${c.start_period+c.period_span-1}节</td><td>${c.week_start}-${c.week_end}周 ${c.week_type==='odd'?'单':c.week_type==='even'?'双':'全'}</td></tr>`});
+        h+='</table>';
+      }
+      document.getElementById('panel').innerHTML=h;
+    });
+    return;
+  }
+  api('/courses').then(r=>r.json()).then(d=>{
+    const list=d.data?.users||[];
     if(!list.length){document.getElementById('panel').innerHTML='<div class="empty">暂无</div>';return}
-    let h=`<table><tr><th>ID</th><th>课程</th><th>教师</th><th>教室</th><th>周几</th><th>节次</th><th>学生</th></tr>`;
-    list.forEach(c=>{h+=`<tr><td>${c.id}</td><td>${esc(c.name)}</td><td>${esc(c.teacher)}</td><td>${esc(c.classroom)}</td><td>周${c.weekday}</td><td>${c.start_period}-${c.start_period+c.period_span-1}节</td><td>${esc(c.nickname||'')}</td></tr>`});
+    let h=`<table><tr><th>ID</th><th>姓名</th><th>学号</th><th>课程数</th><th>操作</th></tr>`;
+    list.forEach(u=>{h+=`<tr><td>${u.id}</td><td>${esc(u.nickname)}</td><td>${esc(u.student_id)}</td><td>${u.course_count}</td><td><button class="btn-sm btn-ok" onclick="courseUserId='${u.id}';fetchCourses()">查看课表</button></td></tr>`});
     h+='</table>';
     document.getElementById('panel').innerHTML=h;
   });

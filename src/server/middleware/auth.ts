@@ -49,7 +49,8 @@ export function auth(req: Request, res: Response, next: NextFunction) {
   pool
     .query('SELECT auth_status FROM users WHERE id = ?', [user.uid])
     .then(([rows]: any) => {
-      const ok = rows[0]?.auth_status === 'verified';
+      const status = rows[0]?.auth_status;
+      const ok = status === 'verified' || status === 'org_verified';
       verifiedCache.set(user.uid, { verified: ok, time: Date.now() });
       req.isVerified = ok;
       next();
