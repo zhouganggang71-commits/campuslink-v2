@@ -6,11 +6,20 @@ import { Listing, Course, Message, StudentProfile } from '../types';
 import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_NOTICES } from '../data';
 import { api, getToken } from '../utils/api';
 
-const CACHE_VERSION = 1; // 修改此值强制清除所有缓存
-
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(`campuslink_${key}`);
+    // 清除含 HEIC 的旧 avatar/cover 缓存
+    if (raw && (key === 'profile')) {
+      const parsed = JSON.parse(raw);
+      if (parsed.avatarUrl && (parsed.avatarUrl.includes('.heic') || parsed.avatarUrl.includes('.HEIC'))) {
+        parsed.avatarUrl = '';
+      }
+      if (parsed.coverUrl && (parsed.coverUrl.includes('.heic') || parsed.coverUrl.includes('.HEIC'))) {
+        parsed.coverUrl = '';
+      }
+      return parsed;
+    }
     return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -28,24 +37,13 @@ export function clearStorageCache() {
   try {
     Object.keys(localStorage)
       .filter(
-        (k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_cache_version'].includes(k),
+        (k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid'].includes(k),
       )
       .forEach((k) => localStorage.removeItem(k));
   } catch {
     /* noop */
   }
 }
-
-// 首次加载或版本升级时清除旧缓存
-(() => {
-  try {
-    const storedVersion = localStorage.getItem('campuslink_cache_version');
-    if (!storedVersion || parseInt(storedVersion) !== CACHE_VERSION) {
-      clearStorageCache();
-      localStorage.setItem('campuslink_cache_version', String(CACHE_VERSION));
-    }
-  } catch { /* noop */ }
-})();
 
 export function useAppData() {
   const [profile, setProfile] = useState<StudentProfile>(() => loadFromStorage('profile', INITIAL_PROFILE));

@@ -1,5 +1,4 @@
 import { useState, lazy, Suspense, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
 
@@ -73,27 +72,23 @@ export default function ListingDetail({
     setSwipeDelta(0);
   }, [swipeDelta, carouselIndex, setCarouselIndex, listing.imageUrls.length]);
 
-  // 跳转个人主页（Portal 到 body，避免父容器 overflow/position 干扰滚动）
   if (showProfile) {
-    return createPortal(
-      <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
-        <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" /></div>}>
-          <ProfilePage
-            userId={listing.publisherId}
-            onBack={() => setShowProfile(false)}
-            placeholder={{
-              name: listing.publisherName,
-              avatar: listing.publisherAvatar,
-              isVerified: listing.isVerifiedStudent,
-              department: listing.department,
-              orgLevel: listing.publisherOrgLevel,
-              orgName: listing.orgName,
-              position: listing.publisherPosition,
-            }}
-          />
-        </Suspense>
-      </div>,
-      document.body,
+    return (
+      <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
+        <ProfilePage
+          userId={listing.publisherId}
+          onBack={() => setShowProfile(false)}
+          placeholder={{
+            name: listing.publisherName,
+            avatar: listing.publisherAvatar,
+            isVerified: listing.isVerifiedStudent,
+            department: listing.department,
+            orgLevel: listing.publisherOrgLevel,
+            orgName: listing.orgName,
+            position: listing.publisherPosition,
+          }}
+        />
+      </Suspense>
     );
   }
 

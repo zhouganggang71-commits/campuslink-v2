@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
-import { createPortal } from 'react-dom';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
 import { api, getToken } from '../../utils/api';
@@ -225,22 +224,19 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
         </div>
       </div>
 
-      {/* 个人主页 Portal */}
-      {showProfile && createPortal(
-        <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
-          <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" /></div>}>
-            <ProfilePage
-              userId={post.user_id || 0}
-              onBack={() => setShowProfile(false)}
-              placeholder={{
-                name: post.nickname || '',
-                avatar: '',
-                isVerified: post.auth_status === 'verified',
-              }}
-            />
-          </Suspense>
-        </div>,
-        document.body,
+      {/* 个人主页 */}
+      {showProfile && (
+        <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
+          <ProfilePage
+            userId={post.user_id || 0}
+            onBack={() => setShowProfile(false)}
+            placeholder={{
+              name: post.nickname || '',
+              avatar: '',
+              isVerified: post.auth_status === 'verified',
+            }}
+          />
+        </Suspense>
       )}
 
       {/* 评论输入 */}
