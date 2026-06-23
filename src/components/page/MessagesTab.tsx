@@ -10,7 +10,7 @@ interface MessagesTabProps {
 }
 
 export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: MessagesTabProps) {
-  const [filter, setFilter] = useState<'all' | 'approval' | 'official'>('all');
+  const [filter, setFilter] = useState<'all' | 'approval' | 'registration' | 'official'>('all');
   const unreadCount = useMemo(() => messages.filter((m) => !m.isRead).length, [messages]);
   const filtered = useMemo(() => {
     if (filter === 'all') return messages;
@@ -34,6 +34,7 @@ export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: Mes
         <div className="flex space-x-2 border-b border-slate-200/50 pb-1 text-xs">
           {[
             { key: 'all', label: '全部' },
+            { key: 'registration', label: '报名' },
             { key: 'approval', label: '审核' },
             { key: 'official', label: '官方通知' },
           ].map((tab) => (
@@ -57,7 +58,11 @@ export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: Mes
               let iconBgClass = 'bg-course-green/10',
                 iconColorClass = 'text-course-green',
                 symbolIcon = 'check_circle';
-              if (msg.status === 'rejected') {
+              if (msg.category === 'registration') {
+                iconBgClass = 'bg-course-blue/10';
+                iconColorClass = 'text-course-blue';
+                symbolIcon = 'how_to_reg';
+              } else if (msg.status === 'rejected') {
                 iconBgClass = 'bg-course-red/10';
                 iconColorClass = 'text-course-red';
                 symbolIcon = 'error';

@@ -150,7 +150,34 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
   const [form, setForm] = useState<Record<string, string>>(buildInitial);
   const [showDraftPrompt, setShowDraftPrompt] = useState(() => !!loadDraft() && !editListing);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── 伪进度动画 ──
+  const startFakeProgress = () => {
+    setUploadProgress(0);
+    const start = Date.now();
+    const DURATION = 2000; // 0→90% 持续 2 秒
+    progressTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(90, Math.round((elapsed / DURATION) * 90));
+      setUploadProgress(pct);
+      if (pct >= 90 && progressTimerRef.current) {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    }, 80);
+  };
+
+  const finishProgress = () => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    setUploadProgress(100);
+    setTimeout(() => setUploadProgress(0), 600);
+  };
 
   const update = (updates: Record<string, string>) => setForm((prev) => ({ ...prev, ...updates }));
   const ft = (key: string) => form[key] || '';
@@ -162,6 +189,13 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
     if (!editListing) debouncedSave(form);
     return () => debouncedSave.flush();
   }, [form, editListing, debouncedSave]);
+
+  // 清理进度定时器
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    };
+  }, []);
 
   // ── Canvas 压缩（长边最大 1920px，JPEG quality 0.8） ──
   const compressImage = (file: File): Promise<Blob> => {
@@ -200,6 +234,7 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
     if (file.size > 10 * 1024 * 1024) return;
 
     setUploadingImage(true);
+    startFakeProgress();
     try {
       // 大于 500KB 的图片先压缩再上传
       const blob = file.size > 500 * 1024 ? await compressImage(file) : file;
@@ -209,7 +244,8 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
       if (res.code === 0 && res.data?.url) {
         update({ imageUrl: res.data.url });
       }
-    } catch { /* 静默，保留 URL 输入作为降级 */ }
+    } catch { /* 静默 */ }
+    finishProgress();
     setUploadingImage(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -697,11 +733,21 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
                   ${uploadingImage ? 'border-primary/30 bg-primary/5' : 'border-gray-300 bg-gray-50 hover:border-primary/50 hover:bg-primary/5'}`}
               >
                 {uploadingImage ? (
-                  <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                  <div className="w-full px-4">
+                    <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-gray-400 mt-1 block text-center">
+                      {uploadProgress >= 100 ? '处理中...' : `上传中 ${uploadProgress}%`}
+                    </span>
+                  </div>
                 ) : (
                   <Icon name="add_a_photo" className="text-2xl text-gray-400" />
                 )}
-                <span className="text-xs text-gray-400">{uploadingImage ? '上传中...' : '点击上传图片（支持 JPG/PNG/WebP，最大 10MB）'}</span>
+                <span className="text-xs text-gray-400">{uploadingImage ? '' : '点击上传图片（支持 JPG/PNG/WebP，最大 10MB）'}</span>
               </div>
               <details className="group">
                 <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600 select-none">或粘贴图片链接</summary>

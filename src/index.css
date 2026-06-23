@@ -41,6 +41,7 @@
 /* 暗色模式 */
 @layer base {
   .dark {
+    /* ── 背景/表面色 ── */
     --color-background: #0f172a;
     --color-surface: #1e293b;
     --color-surface-white: #1e293b;
@@ -49,16 +50,51 @@
     --color-outline: #475569;
     --color-outline-variant: #334155;
     --color-inactive-grey: #64748b;
-    --color-white: #1e293b;
+
+    /* ── 基础色映射（让 bg-white/bg-slate-50 等自动变暗）── */
+    --color-black: #f1f5f9;
+
+    /* slate 全系列 */
     --color-slate-50: #1e293b;
     --color-slate-100: #334155;
+    --color-slate-200: #475569;
+    --color-slate-300: #64748b;
+
+    /* gray 全系列 */
     --color-gray-50: #1e293b;
     --color-gray-100: #334155;
     --color-gray-200: #475569;
+    --color-gray-300: #64748b;
     --color-gray-400: #94a3b8;
     --color-gray-500: #cbd5e1;
-    --color-red-50: #1e293b;
-    --color-black: #f1f5f9;
+    --color-gray-600: #e2e8f0;
+    --color-gray-700: #f1f5f9;
+    --color-gray-800: #f8fafc;
+    --color-gray-900: #ffffff;
+
+    /* amber 背景 → 深色，文字变亮 */
+    --color-amber-50: #3b2e1a;
+    --color-amber-100: #4a3820;
+    --color-amber-500: #fbbf24;
+    --color-amber-600: #fcd34d;
+    --color-amber-700: #fde68a;
+    --color-amber-800: #fef3c7;
+    --color-amber-900: #fffbeb;
+
+    /* red 背景变深，保留 danger 色 */
+    --color-red-50: #3b1a1a;
+    --color-red-100: #4a2020;
+    --color-red-500: #ef4444;
+    --color-red-600: #f87171;
+
+    /* blue 背景 */
+    --color-blue-50: #1a2740;
+
+    /* yellow */
+    --color-yellow-700: #fde68a;
+
+    /* green */
+    --color-green-50: #1a2e1a;
   }
 }
 
@@ -86,6 +122,43 @@ html {
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
+  }
+
+  /* 暗色模式：滚动条 */
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #475569;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+
+  /* 暗色模式：white/black 互换（精确规则，不改变 CSS 变量）*/
+  .dark .bg-white {
+    background-color: #1e293b;
+  }
+  .dark .text-black {
+    color: #f1f5f9;
+  }
+  .dark .border-white {
+    border-color: #334155;
+  }
+
+  /* 暗色模式：阴影 */
+  .dark .shadow-sm,
+  .dark .shadow-xs {
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  }
+  .dark .shadow-md {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  }
+  .dark .shadow-lg {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  }
+  .dark .shadow-2xl {
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  }
+  .dark .ring-white {
+    --tw-ring-color: #334155;
   }
 }
 

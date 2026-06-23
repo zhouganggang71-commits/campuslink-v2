@@ -22,7 +22,7 @@ interface PostDataLayer {
   PUBLISH_COOLDOWN: number;
   MAX_POSTS_PER_DAY: number;
   MAX_POSTS_UNVERIFIED: number;
-  showToast: (msg: string, type?: 'success' | 'info') => void;
+  showToast: (msg: string, type?: 'success' | 'info', action?: { label: string; onClick: () => void }) => void;
   getTodayPostCount: () => number;
 }
 
@@ -178,7 +178,14 @@ export function usePostActions(d: PostDataLayer) {
       isRead: false,
     };
     d.setMessages((prev: Message[]) => [reviewMsg, ...prev]);
-    d.showToast('已提交审核', 'info');
+    d.showToast('发布成功', 'success', {
+      label: '查看',
+      onClick: () => {
+        // 查找已发布帖子（可能还是临时 ID，但列表已更新）
+        const published = d.listings.find((l: Listing) => l.title === full.title && l.publisherName === full.publisherName);
+        if (published) d.setSelectedListing(published);
+      },
+    });
     d.setActiveTab('home');
   };
 

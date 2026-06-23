@@ -135,10 +135,10 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
             onChange={(e) => setContent(e.target.value)}
             placeholder="分享你的校园生活..."
             rows={4}
-            maxLength={200}
+            maxLength={500}
             className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all resize-none"
           />
-          <p className="text-[10px] text-gray-400 mt-1 text-right">{content.length}/200</p>
+          <p className="text-[10px] text-gray-400 mt-1 text-right">{content.length}/500</p>
         </div>
 
         {/* 图片上传 */}

@@ -82,7 +82,7 @@ const CIRCLE_IDS = ['trending', 'study', 'sports', 'hobby', 'treehole', 'career'
 
 export const createCirclePostSchema = z.object({
   circle_id: z.enum(CIRCLE_IDS),
-  content: z.string().min(1, '内容不能为空').max(200, '内容不超过200字'),
+  content: z.string().min(1, '内容不能为空').max(500, '内容不超过500字'),
   images: z.array(z.string()).max(9, '最多9张图片').default([]),
   tags: z.array(z.string().max(20)).max(5, '最多5个标签').default([]),
   is_anonymous: z.boolean().default(false),

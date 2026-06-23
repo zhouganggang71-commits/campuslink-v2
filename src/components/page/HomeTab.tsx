@@ -27,6 +27,7 @@ interface HomeTabProps {
   selectedPostType: string;
   setSelectedPostType: (s: string) => void;
   savedListingIds: string[];
+  currentUserName?: string;
   openListingDetails: (l: Listing) => void;
   onPublishTab: () => void;
   onOpenSearch: () => void;
@@ -42,6 +43,8 @@ export default function HomeTab({
   notices,
   selectedPostType,
   setSelectedPostType,
+  savedListingIds,
+  currentUserName,
   openListingDetails,
   onPublishTab,
   onOpenSearch,
@@ -52,6 +55,7 @@ export default function HomeTab({
   loading,
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
+  const [showMine, setShowMine] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── 下拉刷新 ──
@@ -88,7 +92,7 @@ export default function HomeTab({
     const el = scrollRef.current;
     if (!el) return;
     const handleScroll = () => {
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && hasMore && !loading) {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 400 && hasMore && !loading) {
         onLoadMore();
       }
     };
@@ -105,9 +109,10 @@ export default function HomeTab({
       listings.filter(
         (l) =>
           (selectedPostType === 'all' || l.postType === selectedPostType) &&
-          (selectedDept === 'all' || l.department === selectedDept),
+          (selectedDept === 'all' || l.department === selectedDept) &&
+          (!showMine || l.publisherName === currentUserName),
       ),
-    [listings, selectedPostType, selectedDept],
+    [listings, selectedPostType, selectedDept, showMine, currentUserName],
   );
 
   // 初始加载骨架屏
@@ -190,6 +195,14 @@ export default function HomeTab({
 
         {/* 学院筛选 */}
         <div className="flex gap-1.5 overflow-x-auto hide-scrollbar pb-1">
+          {currentUserName && (
+            <button
+              onClick={() => setShowMine(!showMine)}
+              className={`text-[10px] font-semibold px-3 py-1 rounded-full border shrink-0 cursor-pointer flex items-center gap-1 ${showMine ? 'bg-primary text-white border-primary' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
+            >
+              <Icon name="person" className="text-[10px]" /> 我的发布
+            </button>
+          )}
           <button
             onClick={() => setSelectedDept('all')}
             className={`text-[10px] font-semibold px-3 py-1 rounded-full border shrink-0 cursor-pointer ${selectedDept === 'all' ? 'bg-on-surface text-white border-on-surface' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
@@ -249,6 +262,7 @@ export default function HomeTab({
                 listing={item}
                 postTypeLabel={postTypeLabel}
                 onClick={() => openListingDetails(item)}
+                isSaved={savedListingIds.includes(String(item.id))}
               />
             ))}
           </div>

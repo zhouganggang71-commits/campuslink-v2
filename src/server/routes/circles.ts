@@ -135,7 +135,7 @@ export function registerCircleRoutes(app: any, pool: any) {
       // Zod 入参校验
       const input = validate(res, createCirclePostSchema, req.body);
       if (!input) return;
-      const trimmed = input.content.trim().slice(0, 200);
+      const trimmed = input.content.trim().slice(0, 500);
       const imageArr = input.images.slice(0, 9);
       const tagArr = input.tags.slice(0, 5);
 

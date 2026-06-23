@@ -50,6 +50,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
   const [detailPost, setDetailPost] = useState<CirclePost | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [showCircleGrid, setShowCircleGrid] = useState(false);
 
   useEffect(() => { if (!initialLoaded) init(); }, [init, initialLoaded]);
 
@@ -192,6 +193,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
       {/* 圈子横滑 */}
       <div className="px-4 py-2 flex gap-2 overflow-x-auto hide-scrollbar border-b border-gray-50">
         {!showSearch && (
+          <div className="flex gap-2">
           <button
             onClick={() => setShowSearch(true)}
             className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full shrink-0 bg-slate-100 text-gray-500 hover:bg-slate-200 transition-all cursor-pointer"
@@ -199,6 +201,33 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
             <Icon name="search" className="text-[11px]" />
             搜索
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowCircleGrid(!showCircleGrid)}
+              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full shrink-0 transition-all cursor-pointer ${showCircleGrid ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-gray-500 hover:bg-slate-200'}`}
+            >
+              <Icon name="apps" className="text-[11px]" />
+              导航
+            </button>
+            {showCircleGrid && (
+              <div>
+                <div className="fixed inset-0 z-40" onClick={() => setShowCircleGrid(false)} />
+                <div className="absolute left-0 top-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl z-50 p-3 w-64 grid grid-cols-2 gap-2">
+                  {circles.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => { switchCircle(c.id); setShowCircleGrid(false); }}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${activeCircle === c.id ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-gray-600'}`}
+                    >
+                      <Icon name={CIRCLE_ICONS[c.id] || 'chat'} className="text-sm" />
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          </div>
         )}
         {circles.map((c) => (
           <button

@@ -24,7 +24,20 @@ export default function ScheduleTab({
   onShareSchedule,
   onDeleteCourse,
 }: ScheduleTabProps) {
-  const [selectedWeek, setSelectedWeek] = useState(16);
+  // 计算当前教学周（学期开始日期可配置）
+  const getCurrentTeachingWeek = (): number => {
+    try {
+      const startStr = localStorage.getItem('campuslink_semester_start') || '2025-02-24';
+      const start = new Date(startStr);
+      const now = new Date();
+      const diffMs = now.getTime() - start.getTime();
+      const week = Math.ceil(diffMs / (7 * 24 * 60 * 60 * 1000));
+      return Math.max(1, Math.min(20, week));
+    } catch { return 16; }
+  };
+
+  const currentWeek = getCurrentTeachingWeek();
+  const [selectedWeek, setSelectedWeek] = useState(currentWeek);
   const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
   const [scheduleView, setScheduleView] = useState<'week' | 'day'>('week');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
@@ -91,7 +104,7 @@ export default function ScheduleTab({
                     {Array.from({ length: 20 }, (_, i) => i + 1).map((w) => (
                       <button key={w} onClick={() => { setSelectedWeek(w); setIsWeekDropdownOpen(false); }}
                         className={`w-full text-left text-xs px-4 py-2 hover:bg-slate-50 cursor-pointer ${selectedWeek === w ? 'text-primary font-bold bg-primary/5' : 'text-gray-700'}`}>
-                        第 {w} 周 {w === 16 ? '(本周)' : ''}
+                        第 {w} 周 {w === currentWeek ? '(本周)' : ''}
                       </button>
                     ))}
                   </div>
@@ -102,7 +115,7 @@ export default function ScheduleTab({
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => onShareSchedule(selectedWeek)} className="flex items-center gap-1 text-on-surface-variant border border-gray-200 hover:border-primary/30 hover:text-primary px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors"><Icon name="share_2" className="text-[10px]" /> 导出</button>
-            <button onClick={() => setSelectedWeek(16)} className="bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer">回本周</button>
+            <button onClick={() => setSelectedWeek(currentWeek)} className="bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer">回本周</button>
             <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200">
               <button onClick={() => setScheduleView('week')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer ${scheduleView === 'week' ? 'bg-white text-on-surface shadow-xs' : 'text-gray-500'}`}>周视图</button>
               <button onClick={() => setScheduleView('day')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer ${scheduleView === 'day' ? 'bg-white text-on-surface shadow-xs' : 'text-gray-500'}`}>日视图</button>

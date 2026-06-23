@@ -85,7 +85,7 @@ export interface Message {
   title: string;
   content: string;
   timeText: string;
-  category: 'approval' | 'official';
+  category: 'approval' | 'official' | 'registration';
   status: 'approved' | 'rejected' | 'update' | 'event';
   isRead: boolean;
 }

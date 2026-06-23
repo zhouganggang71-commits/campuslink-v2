@@ -47,7 +47,7 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
         if (postRows.length > 0 && postRows[0].user_id && postRows[0].user_id !== req.userId) {
           const registrantName = input.registrantName || '匿名用户';
           await pool.query(
-            "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
+            "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'registration')",
             [
               postRows[0].user_id,
               '活动新报名',

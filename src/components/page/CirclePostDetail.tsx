@@ -152,7 +152,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
             <Icon name="chat" className="text-base" />
             <span className="text-xs">{comments.length}</span>
           </span>
-          <button onClick={() => onSave(post.id)} className="flex items-center gap-1 text-sm cursor-pointer transition-colors ml-auto" style={{ color: isSaved ? '#f59e0b' : '#9ca3af' }}>
+          <button onClick={() => onSave(post.id)} className={`flex items-center gap-1 text-sm cursor-pointer transition-colors ml-auto ${isSaved ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
             <Icon name="bookmark" className="text-base" />
           </button>
         </div>

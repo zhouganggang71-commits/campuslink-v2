@@ -9,6 +9,7 @@ interface PostCardProps {
   listing: Listing;
   postTypeLabel: (pt: string) => string;
   onClick: () => void;
+  isSaved?: boolean;
 }
 
 function timeAgo(ts: string) {
@@ -21,7 +22,7 @@ function timeAgo(ts: string) {
   return ts?.substring(0, 10) || '';
 }
 
-function PostCardInner({ listing, postTypeLabel, onClick }: PostCardProps) {
+function PostCardInner({ listing, postTypeLabel, onClick, isSaved }: PostCardProps) {
   const hasImage = listing.imageUrls && listing.imageUrls.length > 0 && listing.imageUrls[0];
   return (
     <div
@@ -51,7 +52,10 @@ function PostCardInner({ listing, postTypeLabel, onClick }: PostCardProps) {
           )}
           {listing.price && <span className="text-course-red font-bold ml-auto">¥{listing.price}</span>}
         </div>
-        <h3 className="text-sm font-semibold text-on-surface truncate">{listing.title}</h3>
+        <h3 className="text-sm font-semibold text-on-surface truncate flex items-center gap-1">
+          {isSaved && <Icon name="bookmark" className="text-amber-500 text-xs shrink-0" />}
+          {listing.title}
+        </h3>
         <p className="text-xs text-on-surface-variant mt-1 line-clamp-2 leading-relaxed">{listing.description}</p>
         <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-400 flex-wrap">
           <span>{listing.publisherName}</span>

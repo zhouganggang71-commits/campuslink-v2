@@ -54,8 +54,8 @@ export function useAppData() {
     return raw.filter((id: string) => /^\d+$/.test(id));
   });
   const [carouselIndex, setCarouselIndex] = useState(0);
-  const [selectedPostType, setSelectedPostType] = useState('all');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [selectedPostType, setSelectedPostType] = useState(() => loadFromStorage('home_filter', 'all'));
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
 
   const lastPublishTime = useRef(0);
   const reportedPostIds = useRef(new Set<string>());
@@ -187,7 +187,7 @@ export function useAppData() {
     if (listHasMore && !listLoading) syncPosts(listPage + 1, true);
   };
   const syncFavorites = () => {
-    if (!profile.studentId) return;
+    if (!getToken() || !profile.studentId) return;
     api
       .get<any[]>('/favorites')
       .then((res) => {
@@ -229,6 +229,8 @@ export function useAppData() {
     if (category === 'approval') {
       if (title.includes('通过')) return 'approved';
       if (title.includes('打回') || title.includes('退回')) return 'rejected';
+    }
+    if (category === 'registration') {
       if (title.includes('报名')) return 'event';
     }
     if (category === 'official') {
@@ -249,7 +251,7 @@ export function useAppData() {
             title: n.title || '',
             content: n.content || '',
             timeText: formatRelativeTime(n.created_at),
-            category: (n.category === 'approval' ? 'approval' : 'official') as Message['category'],
+            category: (n.category === 'approval' ? 'approval' : n.category === 'registration' ? 'registration' : 'official') as Message['category'],
             status: deriveStatus(n.title || '', n.category || 'official'),
             isRead: !!n.is_read,
           }));
@@ -280,6 +282,33 @@ export function useAppData() {
     syncMessages();
   }, [profile.studentId, syncMessages]);
 
+  // 消息轮询：90s 间隔，切后台暂停省电
+  useEffect(() => {
+    if (!profile.studentId) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (timer) return;
+      timer = setInterval(() => syncMessages(), 90_000);
+    };
+
+    const stopPolling = () => {
+      if (timer) { clearInterval(timer); timer = null; }
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) { stopPolling(); }
+      else { syncMessages(); startPolling(); }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [profile.studentId, syncMessages]);
+
   // ── localStorage 持久化（合并为一次写入，避免连续触发多次 setItem）──
   useEffect(() => {
     saveToStorage('listings', listings);
@@ -288,6 +317,11 @@ export function useAppData() {
     saveToStorage('profile', profile);
     saveToStorage('saved', savedListingIds);
   }, [listings, courses, messages, profile, savedListingIds]);
+
+  // 分类筛选记忆
+  useEffect(() => {
+    saveToStorage('home_filter', selectedPostType);
+  }, [selectedPostType]);
 
   // ── 计算属性 ──
   const notices = INITIAL_NOTICES;
@@ -302,9 +336,10 @@ export function useAppData() {
   );
   const savedCount = savedListingIds.length;
 
-  function showToast(message: string, type: 'success' | 'info' = 'success') {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  function showToast(message: string, type: 'success' | 'info' = 'success', action?: { label: string; onClick: () => void }) {
+    setToast({ message, type, action });
+    const duration = action ? 5000 : 3000;
+    setTimeout(() => setToast(null), duration);
   }
 
   return {

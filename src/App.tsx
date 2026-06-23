@@ -92,6 +92,7 @@ export default function App() {
                 selectedPostType={d.selectedPostType}
                 setSelectedPostType={d.setSelectedPostType}
                 savedListingIds={d.savedListingIds}
+                currentUserName={d.profile.fullName}
                 openListingDetails={a.openListingDetails}
                 onPublishTab={() => d.setActiveTab('publish')}
                 onOpenSearch={() => d.setIsSearchOpen(true)}
