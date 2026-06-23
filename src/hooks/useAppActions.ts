@@ -24,6 +24,7 @@ export function useAppActions(d: {
   setIsAuthModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setIsShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setShareWeek: React.Dispatch<React.SetStateAction<number>>;
   setEditingListing: React.Dispatch<React.SetStateAction<Listing | null>>;
   setCarouselIndex: React.Dispatch<React.SetStateAction<number>>;
   courseForm: any;

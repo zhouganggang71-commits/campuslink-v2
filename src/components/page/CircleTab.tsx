@@ -11,6 +11,7 @@ import CircleCard from './CircleCard';
 import CirclePostDetail from './CirclePostDetail';
 import CirclePublishModal from '../modal/CirclePublishModal';
 import CircleHotRanking from '../modal/CircleHotRanking';
+import { CardSkeleton } from '../ui/Skeleton';
 import type { CirclePost } from '../../hooks/useCircles';
 
 interface CircleTabProps {
@@ -38,7 +39,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
   const {
     circles, activeCircle,
     posts, loading, page, totalPages, goToPage,
-    init, switchCircle,
+    init, switchCircle, searchPosts,
     prependPost, updateLikeCount,
     initialLoaded,
   } = useCircles();
@@ -63,9 +64,18 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
 
   useEffect(() => { saveSaved(savedIds); }, [savedIds]);
 
-  const filteredPosts = searchQuery.trim()
-    ? posts.filter((p) => p.content.toLowerCase().includes(searchQuery.toLowerCase()))
-    : posts;
+  // ── 服务端搜索（替代客户端过滤） ──
+  const handleSearch = useCallback(() => {
+    searchPosts(searchQuery.trim());
+  }, [searchQuery, searchPosts]);
+
+  // 清空搜索时恢复全部
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+    searchPosts('');
+  }, [searchPosts]);
+
+  const filteredPosts = posts;
 
   const handleLike = useCallback(async (postId: number) => {
     if (isGuest) return showToast('请先登录');
@@ -149,21 +159,29 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="搜索校园圈内容..."
               className="w-full bg-slate-100 text-xs border-0 rounded-lg pl-9 pr-8 py-2 focus:ring-2 focus:ring-primary/10 focus:outline-none"
               autoFocus
             />
             {searchQuery && (
               <button
-                onClick={() => setSearchQuery('')}
+                onClick={handleClearSearch}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 cursor-pointer"
+                aria-label="清空搜索"
               >
                 <Icon name="close" className="text-xs" />
               </button>
             )}
           </div>
           <button
-            onClick={() => { setShowSearch(false); setSearchQuery(''); }}
+            onClick={handleSearch}
+            className="text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-3 py-2 cursor-pointer"
+          >
+            搜索
+          </button>
+          <button
+            onClick={() => { setShowSearch(false); handleClearSearch(); }}
             className="text-[10px] text-gray-500 hover:text-gray-700 px-2 py-1 cursor-pointer"
           >
             取消
@@ -197,9 +215,10 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
       {/* 帖子流 */}
       <div className="flex-1 px-4 py-3 flex flex-col gap-3">
         {!initialLoaded && loading ? (
-          <div className="flex flex-col items-center justify-center py-24 text-gray-400">
-            <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
-            <p className="text-[11px]">加载中...</p>
+          <div className="flex flex-col gap-3">
+            {[1, 2, 3].map((i) => (
+              <CardSkeleton key={i} />
+            ))}
           </div>
         ) : posts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">

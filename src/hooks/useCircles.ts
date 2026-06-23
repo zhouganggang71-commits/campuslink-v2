@@ -59,12 +59,14 @@ export function useCircles() {
   }, []);
 
   // 获取帖子流
-  const fetchPosts = useCallback(async (circleId: string, pageNum: number) => {
+  const fetchPosts = useCallback(async (circleId: string, pageNum: number, keyword = '') => {
     setLoading(true);
     try {
+      const params = new URLSearchParams({ page: String(pageNum), size: '20' });
+      if (keyword) params.set('keyword', keyword);
       const url = circleId === 'trending'
-        ? `/circles/trending?page=${pageNum}&size=20`
-        : `/circles/${circleId}/posts?page=${pageNum}&size=20`;
+        ? `/circles/trending?${params}`
+        : `/circles/${circleId}/posts?${params}`;
       const res = await api.get<{ list: CirclePost[]; total: number; totalPages: number }>(url);
       if (res.code === 0 && res.data) {
         setPosts(res.data.list);
@@ -81,6 +83,11 @@ export function useCircles() {
     setPage(1);
     fetchPosts(circleId, 1);
   }, [fetchPosts]);
+
+  // 服务端搜索
+  const searchPosts = useCallback((keyword: string) => {
+    fetchPosts(activeCircle, 1, keyword);
+  }, [activeCircle, fetchPosts]);
 
   // 翻页
   const goToPage = useCallback((pageNum: number) => {
@@ -100,7 +107,7 @@ export function useCircles() {
   return {
     circles, activeCircle,
     posts, loading, page, totalPages, goToPage,
-    init, switchCircle,
+    init, switchCircle, searchPosts,
     prependPost, updateLikeCount,
     initialLoaded,
   };

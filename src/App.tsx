@@ -15,6 +15,7 @@ import BottomNav from './components/layout/BottomNav';
 import AuthModal from './components/modal/AuthModal';
 import AddCourseModal from './components/modal/AddCourseModal';
 import ShareScheduleModal from './components/modal/ShareScheduleModal';
+import OfflineBanner from './components/ui/OfflineBanner';
 
 // 路由级懒加载 — 首屏仅加载当前 Tab
 const HomeTab = lazy(() => import('./components/page/HomeTab'));
@@ -47,6 +48,7 @@ export default function App() {
 
   return (
     <div className="w-full min-h-screen bg-slate-50 text-on-surface font-sans antialiased pb-20 flex flex-col items-center">
+      <OfflineBanner />
       <Toast toast={d.toast} />
 
       <Header
@@ -178,7 +180,6 @@ export default function App() {
         {d.isSearchOpen && !d.selectedListing && (
           <div className="absolute inset-0 z-30 bg-white">
             <SearchPage
-              listings={d.listings}
               savedListingIds={d.savedListingIds}
               onOpenDetail={(l: Listing) => {
                 a.openListingDetails(l);
@@ -225,8 +226,9 @@ export default function App() {
 
       <ShareScheduleModal
         isOpen={d.isShareModalOpen}
-        selectedWeek={16}
-        courseCount={0}
+        selectedWeek={d.shareWeek}
+        courseCount={d.courses.filter(c => c.weekStart <= d.shareWeek && c.weekEnd >= d.shareWeek).length}
+        courses={d.courses}
         onClose={() => d.setIsShareModalOpen(false)}
       />
     </div>

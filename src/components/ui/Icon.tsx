@@ -64,6 +64,7 @@ import {
   Sun,
   Moon,
   UsersRound,
+  WifiOff,
 } from 'lucide-react';
 import { memo } from 'react';
 
@@ -147,6 +148,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   dark_mode: Moon,
   sunny: Sun,
   group: UsersRound,
+  wifi_off: WifiOff,
 };
 
 function sizeClass(cls: string): number {

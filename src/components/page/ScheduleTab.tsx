@@ -10,7 +10,7 @@ interface ScheduleTabProps {
   courses: Course[];
   onAddCourse: () => void;
   onImportCourses: (courses: Omit<Course, 'id'>[]) => void;
-  onShareSchedule: () => void;
+  onShareSchedule: (week: number) => void;
   onDeleteCourse: (id: string) => void;
 }
 
@@ -101,6 +101,7 @@ export default function ScheduleTab({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => onShareSchedule(selectedWeek)} className="flex items-center gap-1 text-on-surface-variant border border-gray-200 hover:border-primary/30 hover:text-primary px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors"><Icon name="share_2" className="text-[10px]" /> 导出</button>
             <button onClick={() => setSelectedWeek(16)} className="bg-primary/10 text-primary border border-primary/20 px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer">回本周</button>
             <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200">
               <button onClick={() => setScheduleView('week')} className={`text-[10px] font-bold px-3 py-1 rounded-md cursor-pointer ${scheduleView === 'week' ? 'bg-white text-on-surface shadow-xs' : 'text-gray-500'}`}>周视图</button>

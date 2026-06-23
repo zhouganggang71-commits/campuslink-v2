@@ -79,7 +79,7 @@ export default function AdBanner() {
         </span>
         <button
           onClick={handleDismiss}
-          className="absolute top-1.5 left-1.5 w-5 h-5 bg-black/40 hover:bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          className="absolute top-1.5 left-1.5 w-5 h-5 bg-black/40 hover:bg-black/60 rounded-full flex items-center justify-center cursor-pointer"
           aria-label="关闭广告"
         >
           <Icon name="close" className="text-white text-[9px]" />

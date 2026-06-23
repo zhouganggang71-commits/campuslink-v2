@@ -55,7 +55,9 @@ export default memo(function Header({
         >
           <Icon name="notifications" className="text-lg" />
           {unreadCount > 0 && (
-            <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white" />
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 ring-2 ring-white">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
           )}
         </button>
         <button

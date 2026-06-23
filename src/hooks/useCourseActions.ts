@@ -9,6 +9,7 @@ interface CourseDataLayer {
   courses: Course[];
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
   setIsShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setShareWeek: React.Dispatch<React.SetStateAction<number>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
   courseForm: {
     name: string;
@@ -130,7 +131,8 @@ export function useCourseActions(d: CourseDataLayer) {
     d.showToast(`已导入 ${imported.length} 门课程`, 'success');
   };
 
-  const handleShareSchedule = () => {
+  const handleShareSchedule = (week: number) => {
+    d.setShareWeek(week);
     d.setIsShareModalOpen(true);
   };
 

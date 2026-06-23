@@ -161,6 +161,33 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
     return () => debouncedSave.flush();
   }, [form, editListing, debouncedSave]);
 
+  // ── Canvas 压缩（长边最大 1920px，JPEG quality 0.8） ──
+  const compressImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1920;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Canvas 不可用'));
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('压缩失败'));
+        }, 'image/jpeg', 0.8);
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   // ── 图片上传 ──
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -170,8 +197,10 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
 
     setUploadingImage(true);
     try {
+      // 大于 500KB 的图片先压缩再上传
+      const blob = file.size > 500 * 1024 ? await compressImage(file) : file;
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', blob, blob instanceof File ? blob.name : 'compressed.jpg');
       const res = await api.upload<{ url: string }>('/upload', formData);
       if (res.code === 0 && res.data?.url) {
         update({ imageUrl: res.data.url });

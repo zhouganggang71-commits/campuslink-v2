@@ -68,6 +68,10 @@ export function useAppData() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAddCourseOpen, setIsAddCourseOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareWeek, setShareWeek] = useState(() => {
+    // 默认当前教学周（学期第1周从3月开始估算，实际以用户选择为准）
+    return 16;
+  });
   const [editingListing, setEditingListing] = useState<Listing | null>(null);
   const [courseForm, setCourseForm] = useState({
     name: '',
@@ -348,6 +352,8 @@ export function useAppData() {
     setIsAddCourseOpen,
     isShareModalOpen,
     setIsShareModalOpen,
+    shareWeek,
+    setShareWeek,
     editingListing,
     setEditingListing,
     courseForm,

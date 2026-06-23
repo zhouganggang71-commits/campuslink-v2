@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import Icon from './Icon';
 
 interface ModalProps {
@@ -27,6 +27,19 @@ export default function Modal({
   showCloseButton = true,
 }: ModalProps) {
   if (!isOpen) return null;
+
+  // ── ESC 关闭 + 背景滚动锁定 ──
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
 
   const isCenter = position === 'center';
 

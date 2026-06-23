@@ -1,12 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Listing } from '../../types';
 import { api } from '../../utils/api';
 import Icon from '../ui/Icon';
-import Button from '../ui/Button';
 import type { CirclePost } from '../../hooks/useCircles';
 
 interface SearchPageProps {
-  listings: Listing[];
   savedListingIds: string[];
   onOpenDetail: (l: Listing) => void;
   onClose: () => void;
@@ -14,37 +12,66 @@ interface SearchPageProps {
 }
 
 export default function SearchPage({
-  listings,
   savedListingIds,
   onOpenDetail,
   onClose,
   postTypeLabel,
 }: SearchPageProps) {
   const [query, setQuery] = useState('');
+  const [posts, setPosts] = useState<Listing[]>([]);
   const [circlePosts, setCirclePosts] = useState<CirclePost[]>([]);
+  const [searching, setSearching] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => {
-    api.get<{ list: CirclePost[] }>('/circles/trending?page=1&size=50').then((res) => {
-      if (res.code === 0 && res.data?.list) setCirclePosts(res.data.list);
-    }).catch(() => {});
+  // ── 服务端搜索（300ms 防抖）──
+  const doSearch = useCallback(async (keyword: string) => {
+    if (!keyword.trim()) {
+      setPosts([]);
+      setCirclePosts([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const [postsRes, circlesRes] = await Promise.all([
+        api.get<{ list: any[] }>(`/posts?keyword=${encodeURIComponent(keyword)}&limit=30`),
+        api.get<{ list: CirclePost[] }>(`/circles/trending?keyword=${encodeURIComponent(keyword)}&page=1&size=30`),
+      ]);
+      if (postsRes.code === 0 && postsRes.data?.list) {
+        setPosts(postsRes.data.list.map((p: any) => ({
+          id: String(p.id),
+          title: p.title,
+          price: p.price,
+          description: p.description,
+          imageUrls: Array.isArray(p.image_urls) ? p.image_urls : (p.image_urls ? JSON.parse(p.image_urls) : []),
+          category: p.category,
+          postType: p.post_type,
+          publisherName: p.publisher_name || p.nickname || '',
+          publisherAvatar: '',
+          isVerifiedStudent: true,
+          isOfficialOrg: p.is_official,
+          publishedTimeText: p.created_at?.substring(0, 10) || '',
+          views: p.views || 0,
+          favorites: 0,
+          contactInfo: p.contact_info,
+          status: p.status || 'active',
+        } as Listing)));
+      } else setPosts([]);
+
+      if (circlesRes.code === 0 && circlesRes.data?.list) {
+        setCirclePosts(circlesRes.data.list);
+      } else setCirclePosts([]);
+    } catch { /* 静默 */ }
+    setSearching(false);
   }, []);
 
-  const results = useMemo(() => {
-    if (!query.trim()) return { posts: [] as Listing[], circles: [] as CirclePost[] };
-    const q = query.toLowerCase();
-    const matchedPosts = listings.filter(
-      (l) =>
-        l.title.toLowerCase().includes(q) ||
-        l.description.toLowerCase().includes(q) ||
-        l.category.toLowerCase().includes(q),
-    );
-    const matchedCircles = circlePosts.filter(
-      (p) => p.content.toLowerCase().includes(q),
-    );
-    return { posts: matchedPosts, circles: matchedCircles };
-  }, [listings, circlePosts, query]);
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => doSearch(query), 300);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [query, doSearch]);
 
-  const totalResults = results.posts.length + results.circles.length;
+  const totalResults = posts.length + circlePosts.length;
+  const hasQuery = query.trim().length > 0;
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
@@ -77,12 +104,17 @@ export default function SearchPage({
       </header>
 
       <section className="p-4 flex-1">
-        {!query.trim() ? (
+        {!hasQuery ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Icon name="search" className="text-5xl mb-3 text-gray-200" />
             <p className="text-xs">输入关键词搜索信息</p>
           </div>
-        ) : results.posts.length === 0 && results.circles.length === 0 ? (
+        ) : searching ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+            <p className="text-xs text-gray-400">搜索中...</p>
+          </div>
+        ) : totalResults === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Icon name="search_off" className="text-5xl mb-3 text-gray-200" />
             <p className="text-xs">没有找到"{query}"相关的结果</p>
@@ -90,11 +122,11 @@ export default function SearchPage({
         ) : (
           <div>
             <p className="text-[10px] text-gray-400 font-bold mb-3">找到 {totalResults} 条结果</p>
-            {results.posts.length > 0 && (
+            {posts.length > 0 && (
               <>
                 <p className="text-[10px] text-gray-400 font-semibold mb-2">信息广场</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                  {results.posts.map((item) => (
+                  {posts.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => onOpenDetail(item)}
@@ -141,11 +173,11 @@ export default function SearchPage({
                 </div>
               </>
             )}
-            {results.circles.length > 0 && (
+            {circlePosts.length > 0 && (
               <>
                 <p className="text-[10px] text-gray-400 font-semibold mb-2">校园圈</p>
                 <div className="space-y-2 mb-4">
-                  {results.circles.map((p) => (
+                  {circlePosts.map((p) => (
                     <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-3">
                       <div className="flex items-center gap-1.5 mb-1">
                         <span className="text-[10px] font-semibold text-gray-500">{p.is_anonymous ? '匿名同学' : p.nickname}</span>

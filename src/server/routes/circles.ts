@@ -45,9 +45,20 @@ export function registerCircleRoutes(app: any, pool: any) {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const size = Math.min(30, Math.max(1, parseInt(req.query.size as string) || 20));
       const offset = (page - 1) * size;
+      const keyword = (req.query.keyword as string) || '';
+
+      let where = "WHERE cp.status = 'active'";
+      const params: any[] = [];
+
+      if (keyword) {
+        where += " AND (cp.content LIKE ? OR u.nickname LIKE ?)";
+        const like = `%${keyword.replace(/[%_]/g, '\\$&')}%`;
+        params.push(like, like);
+      }
 
       const [countRows]: any = await pool.query(
-        "SELECT COUNT(*) as total FROM circle_posts WHERE status = 'active'"
+        `SELECT COUNT(*) as total FROM circle_posts cp JOIN users u ON cp.user_id = u.id ${where}`,
+        params
       );
       const total = countRows[0].total;
 
@@ -60,10 +71,10 @@ export function registerCircleRoutes(app: any, pool: any) {
                 ROUND((cp.like_count + cp.comment_count * 2 + 1) / POWER(TIMESTAMPDIFF(HOUR, cp.created_at, NOW()) + 2, 1.5), 2) AS hot_score
          FROM circle_posts cp
          JOIN users u ON cp.user_id = u.id
-         WHERE cp.status = 'active'
+         ${where}
          ORDER BY hot_score DESC, cp.created_at DESC
          LIMIT ? OFFSET ?`,
-        [size, offset]
+        [...params, size, offset]
       );
       ok(res, { list: parseCirclePosts(rows), total, page, size, totalPages: Math.ceil(total / size) });
     } catch (err: any) {
@@ -79,9 +90,20 @@ export function registerCircleRoutes(app: any, pool: any) {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const size = Math.min(30, Math.max(1, parseInt(req.query.size as string) || 20));
       const offset = (page - 1) * size;
+      const keyword = (req.query.keyword as string) || '';
+
+      let where = "WHERE cp.circle_id = ? AND cp.status = 'active'";
+      const params: any[] = [circleId];
+
+      if (keyword) {
+        where += " AND (cp.content LIKE ? OR u.nickname LIKE ?)";
+        const like = `%${keyword.replace(/[%_]/g, '\\$&')}%`;
+        params.push(like, like);
+      }
 
       const [countRows]: any = await pool.query(
-        "SELECT COUNT(*) as total FROM circle_posts WHERE circle_id = ? AND status = 'active'", [circleId]
+        `SELECT COUNT(*) as total FROM circle_posts cp JOIN users u ON cp.user_id = u.id ${where}`,
+        params
       );
       const total = countRows[0].total;
 
@@ -91,10 +113,10 @@ export function registerCircleRoutes(app: any, pool: any) {
                 u.nickname, u.auth_status, u.is_admin
          FROM circle_posts cp
          JOIN users u ON cp.user_id = u.id
-         WHERE cp.circle_id = ? AND cp.status = 'active'
+         ${where}
          ORDER BY cp.created_at DESC
          LIMIT ? OFFSET ?`,
-        [circleId, size, offset]
+        [...params, size, offset]
       );
       ok(res, { list: parseCirclePosts(rows), total, page, size, totalPages: Math.ceil(total / size) });
     } catch (err: any) {
