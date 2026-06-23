@@ -110,7 +110,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
   const displayJoined = profile?.joinedAt || '';
 
   return (
-    <div className="flex flex-col flex-1 animate-fade-in bg-slate-50 min-h-full">
+    <div className="flex flex-col animate-fade-in bg-slate-50">
       {/* ── 顶栏：返回按钮 ── */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-3">
         <button
@@ -213,7 +213,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
       </div>
 
       {/* ── Tab + 内容 ── */}
-      <div className="flex-1 mt-5">
+      <div className="mt-5">
         {/* Tab 切换 */}
         <div className="flex border-b border-gray-100 bg-white sticky top-0 z-10">
           {([
