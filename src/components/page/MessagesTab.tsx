@@ -7,9 +7,10 @@ interface MessagesTabProps {
   messages: Message[];
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
+  onDeleteMessage: (id: string) => void;
 }
 
-export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: MessagesTabProps) {
+export default function MessagesTab({ messages, onMarkRead, onMarkAllRead, onDeleteMessage }: MessagesTabProps) {
   const [filter, setFilter] = useState<'all' | 'approval' | 'registration' | 'official'>('all');
   const unreadCount = useMemo(() => messages.filter((m) => !m.isRead).length, [messages]);
   const filtered = useMemo(() => {
@@ -79,8 +80,15 @@ export default function MessagesTab({ messages, onMarkRead, onMarkAllRead }: Mes
                 <div
                   key={msg.id}
                   onClick={() => onMarkRead(msg.id)}
-                  className={`bg-white rounded-xl p-3.5 shadow-sm border border-slate-100 flex gap-3 items-start transition-all cursor-pointer ${msg.isRead ? 'opacity-70 hover:opacity-90' : 'hover:translate-x-1 duration-150'}`}
+                  className={`bg-white rounded-xl p-3.5 shadow-sm border border-slate-100 flex gap-3 items-start transition-all cursor-pointer relative ${msg.isRead ? 'opacity-70 hover:opacity-90' : 'hover:translate-x-1 duration-150'}`}
                 >
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteMessage(msg.id); }}
+                    className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors cursor-pointer z-10"
+                    aria-label="删除消息"
+                  >
+                    <Icon name="close" className="text-xs" />
+                  </button>
                   <div
                     className={`shrink-0 w-10 h-10 ${iconBgClass} rounded-full flex items-center justify-center relative`}
                   >

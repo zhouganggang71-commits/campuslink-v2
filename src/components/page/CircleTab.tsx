@@ -1,7 +1,7 @@
 /**
  * 校园圈 Tab — 圈子横滑 + 帖子流 + 热度排行 + 发布入口
  */
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { useCircles } from '../../hooks/useCircles';
 import { api, getToken } from '../../utils/api';
 import Button from '../ui/Button';
@@ -11,6 +11,7 @@ import CircleCard from './CircleCard';
 import CirclePostDetail from './CirclePostDetail';
 import CirclePublishModal from '../modal/CirclePublishModal';
 import CircleHotRanking from '../modal/CircleHotRanking';
+import ScrollToTop from '../ui/ScrollToTop';
 import { CardSkeleton } from '../ui/Skeleton';
 import type { CirclePost } from '../../hooks/useCircles';
 
@@ -51,6 +52,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [showCircleGrid, setShowCircleGrid] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (!initialLoaded) init(); }, [init, initialLoaded]);
 
@@ -242,7 +244,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
       </div>
 
       {/* 帖子流 */}
-      <div className="flex-1 px-4 py-3 flex flex-col gap-3">
+      <div ref={scrollRef} className="flex-1 px-4 py-3 flex flex-col gap-3 overflow-y-auto">
         {!initialLoaded && loading ? (
           <div className="flex flex-col gap-3">
             {[1, 2, 3].map((i) => (
@@ -301,6 +303,8 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
         isOpen={hotRankingOpen}
         onClose={() => setHotRankingOpen(false)}
       />
+
+      <ScrollToTop containerRef={scrollRef} />
     </div>
   );
 }

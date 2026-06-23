@@ -21,22 +21,23 @@ interface AddCourseModalProps {
     colorClass: string;
   };
   onChange: (updates: Partial<AddCourseModalProps['form']>) => void;
+  editMode?: boolean;
 }
 
-export default function AddCourseModal({ isOpen, onClose, onSubmit, form, onChange }: AddCourseModalProps) {
+export default function AddCourseModal({ isOpen, onClose, onSubmit, form, onChange, editMode }: AddCourseModalProps) {
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="添加课程"
-      subtitle="手动录入课程信息到你的课表"
+      title={editMode ? '编辑课程' : '添加课程'}
+      subtitle={editMode ? '修改课程信息' : '手动录入课程信息到你的课表'}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" block onClick={onClose}>
             取消
           </Button>
           <Button variant="primary" size="sm" block onClick={(e: any) => onSubmit(e)}>
-            确认添加
+            {editMode ? '保存修改' : '确认添加'}
           </Button>
         </div>
       }

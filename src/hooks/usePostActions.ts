@@ -130,7 +130,7 @@ export function usePostActions(d: PostDataLayer) {
     const full: Listing = {
       ...newListing,
       id: listingId,
-      status: 'pending',
+      status: 'active',
       publisherName: d.profile.fullName,
       publisherAvatar: d.profile.avatarUrl,
       isVerifiedStudent: d.profile.isVerified,

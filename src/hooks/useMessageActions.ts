@@ -5,6 +5,7 @@ import { Message } from '../types';
 import { api } from '../utils/api';
 
 interface MessageDataLayer {
+  messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   showToast: (msg: string, type?: 'success' | 'info') => void;
 }
@@ -23,8 +24,19 @@ export function useMessageActions(d: MessageDataLayer) {
     api.put('/notices/read-all').catch(() => {});
   };
 
+  const handleDeleteMessage = (messageId: string) => {
+    const prevMessages = [...d.messages];
+    d.setMessages((prev: Message[]) => prev.filter((m) => m.id !== messageId));
+    api.delete(`/notices/${messageId}`)
+      .catch(() => {
+        d.setMessages(prevMessages);
+        d.showToast('删除失败，请重试', 'info');
+      });
+  };
+
   return {
     handleMarkMessageRead,
     handleMarkAllRead,
+    handleDeleteMessage,
   };
 }

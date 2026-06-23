@@ -11,6 +11,18 @@ interface SearchPageProps {
   postTypeLabel: (pt: string) => string;
 }
 
+// ── 搜索历史持久化（最近10条去重）──
+const HISTORY_KEY = 'campuslink_search_history';
+function loadHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveHistory(terms: string[]) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(terms)); } catch {}
+}
+
 export default function SearchPage({
   savedListingIds,
   onOpenDetail,
@@ -21,6 +33,7 @@ export default function SearchPage({
   const [posts, setPosts] = useState<Listing[]>([]);
   const [circlePosts, setCirclePosts] = useState<CirclePost[]>([]);
   const [searching, setSearching] = useState(false);
+  const [history, setHistory] = useState<string[]>(loadHistory);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // ── 服务端搜索（300ms 防抖）──
@@ -36,6 +49,15 @@ export default function SearchPage({
         api.get<{ list: any[] }>(`/posts?keyword=${encodeURIComponent(keyword)}&limit=30`),
         api.get<{ list: CirclePost[] }>(`/circles/trending?keyword=${encodeURIComponent(keyword)}&page=1&size=30`),
       ]);
+
+      // 写入搜索历史（去重，保持最近10条）
+      const trimmed = keyword.trim();
+      setHistory((prev) => {
+        const next = [trimmed, ...prev.filter((t) => t !== trimmed)].slice(0, 10);
+        saveHistory(next);
+        return next;
+      });
+
       if (postsRes.code === 0 && postsRes.data?.list) {
         setPosts(postsRes.data.list.map((p: any) => ({
           id: String(p.id),
@@ -73,6 +95,17 @@ export default function SearchPage({
   const totalResults = posts.length + circlePosts.length;
   const hasQuery = query.trim().length > 0;
 
+  const removeHistoryItem = (term: string) => {
+    const next = history.filter((t) => t !== term);
+    setHistory(next);
+    saveHistory(next);
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    saveHistory([]);
+  };
+
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
       <header className="px-4 py-3 bg-white border-b border-gray-100 flex items-center gap-3 sticky top-14 z-20">
@@ -105,10 +138,39 @@ export default function SearchPage({
 
       <section className="p-4 flex-1">
         {!hasQuery ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <Icon name="search" className="text-5xl mb-3 text-gray-200" />
-            <p className="text-xs">输入关键词搜索信息</p>
-          </div>
+          history.length > 0 ? (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-bold text-gray-400">搜索历史</span>
+                <button onClick={clearHistory} className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer">
+                  清空历史
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {history.map((term) => (
+                  <div key={term} className="flex items-center gap-1 bg-slate-50 border border-gray-100 rounded-full px-3 py-1.5 group">
+                    <button
+                      onClick={() => setQuery(term)}
+                      className="text-xs text-gray-600 hover:text-primary cursor-pointer"
+                    >
+                      {term}
+                    </button>
+                    <button
+                      onClick={() => removeHistoryItem(term)}
+                      className="text-gray-300 hover:text-gray-500 cursor-pointer"
+                    >
+                      <Icon name="close" className="text-[10px]" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+              <Icon name="search" className="text-5xl mb-3 text-gray-200" />
+              <p className="text-xs">输入关键词搜索信息</p>
+            </div>
+          )
         ) : searching ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />

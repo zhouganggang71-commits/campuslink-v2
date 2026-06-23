@@ -70,4 +70,22 @@ export function registerNoticeRoutes(app: any, pool: Pool) {
       fail(res, 500, '操作失败');
     }
   });
+
+  // ── 单条删除 ──
+  app.delete('/api/v1/notices/:id', auth, limiter(30), async (req: Request, res: Response) => {
+    try {
+      const [result]: any = await pool.query(
+        'DELETE FROM notices WHERE id = ? AND user_id = ?',
+        [req.params.id, req.userId],
+      );
+      if (result.affectedRows === 0) {
+        return fail(res, 404, '消息不存在或不属于你');
+      }
+      ok(res, null);
+    } catch (err: any) {
+      if (isSchemaError(err)) return ok(res, null);
+      logger.error('删除消息失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
+      fail(res, 500, '操作失败');
+    }
+  });
 }

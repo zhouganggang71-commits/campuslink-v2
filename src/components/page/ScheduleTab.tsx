@@ -9,6 +9,7 @@ import ScheduleImportModal from '../modal/ScheduleImportModal';
 interface ScheduleTabProps {
   courses: Course[];
   onAddCourse: () => void;
+  onEditCourse: (course: Course) => void;
   onImportCourses: (courses: Omit<Course, 'id'>[]) => void;
   onShareSchedule: (week: number) => void;
   onDeleteCourse: (id: string) => void;
@@ -20,6 +21,7 @@ const DAY_CHARS = ['一', '二', '三', '四', '五', '六', '日'];
 export default function ScheduleTab({
   courses,
   onAddCourse,
+  onEditCourse,
   onImportCourses,
   onShareSchedule,
   onDeleteCourse,
@@ -42,6 +44,20 @@ export default function ScheduleTab({
   const [scheduleView, setScheduleView] = useState<'week' | 'day'>('week');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+
+  // ── 动态学年学期计算 ──
+  const semesterLabel = useMemo(() => {
+    try {
+      const startStr = localStorage.getItem('campuslink_semester_start') || '2025-02-24';
+      const start = new Date(startStr);
+      const year = start.getFullYear();
+      const month = start.getMonth() + 1;
+      const semester = month <= 8 ? '春季学期' : '秋季学期';
+      // 春季学期显示为 上一年-本年，秋季显示为 本年-下一年
+      const academicYear = month <= 8 ? `${year - 1}-${year}` : `${year}-${year + 1}`;
+      return `${academicYear}学年 ${semester}`;
+    } catch { return '2025-2026学年 春季学期'; }
+  }, []);
 
   const selectedDay = useMemo(() => {
     const d = new Date().getDay();
@@ -92,7 +108,7 @@ export default function ScheduleTab({
       <section className="px-4 py-4 bg-white border-b border-gray-100" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         <div className="flex justify-between items-center">
           <div className="flex flex-col">
-            <span className="text-[11px] text-gray-400 mb-0.5 font-medium">2023-2024学年 秋季学期</span>
+            <span className="text-[11px] text-gray-400 mb-0.5 font-medium">{semesterLabel}</span>
             <div className="flex items-center gap-1">
               <button onClick={prevWeek} className="p-1 hover:bg-slate-100 rounded-full cursor-pointer"><Icon name="chevron_left" className="text-sm text-gray-400" /></button>
               <div className="relative">
@@ -209,7 +225,7 @@ export default function ScheduleTab({
       {selectedCourse && (
         <Modal isOpen={true} onClose={() => setSelectedCourse(null)}
           title={<span className="flex items-center gap-2"><span className={`w-3 h-3 rounded-full ${selectedCourse.colorClass.split(' ')[0]}`} />{selectedCourse.name}</span>}
-          footer={<Button variant="danger" block onClick={() => { if (confirm(`删除课程「${selectedCourse.name}」？`)) { onDeleteCourse(selectedCourse.id); setSelectedCourse(null); } }}><Icon name="trash_2" className="text-sm" /> 删除课程</Button>}>
+          footer={<div className="flex gap-2"><Button variant="primary" size="sm" block onClick={() => { onEditCourse(selectedCourse); setSelectedCourse(null); }}><Icon name="edit" className="text-sm" /> 编辑课程</Button><Button variant="danger" size="sm" block onClick={() => { if (confirm(`删除课程「${selectedCourse.name}」？`)) { onDeleteCourse(selectedCourse.id); setSelectedCourse(null); } }}><Icon name="trash_2" className="text-sm" /> 删除课程</Button></div>}>
           <div className="space-y-2.5 text-xs">
             <div className="flex justify-between py-1.5 border-b border-gray-50">
               <span className="text-gray-400">教师</span>

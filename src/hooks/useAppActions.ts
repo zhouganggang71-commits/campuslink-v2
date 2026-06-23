@@ -23,6 +23,8 @@ export function useAppActions(d: {
   setActiveTab: React.Dispatch<React.SetStateAction<string>>;
   setIsAuthModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  editingCourseId: string | null;
+  setEditingCourseId: React.Dispatch<React.SetStateAction<string | null>>;
   setIsShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setShareWeek: React.Dispatch<React.SetStateAction<number>>;
   setEditingListing: React.Dispatch<React.SetStateAction<Listing | null>>;
@@ -44,13 +46,14 @@ export function useAppActions(d: {
   const { toggleSaveListing, openListingDetails, handleDelete, handleCopyContact, handleReport, handleStartEdit, handlePublish } = usePostActions(d);
   const { handleAuth } = useAuthActions(d);
   const { handleAddCourse, handleDeleteCourse, handleImportCourses, handleShareSchedule } = useCourseActions(d);
-  const { handleMarkMessageRead, handleMarkAllRead } = useMessageActions(d);
+  const { handleMarkMessageRead, handleMarkAllRead, handleDeleteMessage } = useMessageActions(d);
 
   return {
     toggleSaveListing,
     openListingDetails,
     handleMarkMessageRead,
     handleMarkAllRead,
+    handleDeleteMessage,
     handleDelete,
     handleCopyContact,
     handleReport,

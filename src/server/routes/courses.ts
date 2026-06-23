@@ -130,6 +130,37 @@ export function registerCourseRoutes(app: any, pool: Pool) {
     }
   });
 
+  app.put('/api/v1/courses/:id', auth, limiter(50), async (req: Request, res: Response) => {
+    try {
+      const input = validate(res, createCourseSchema, req.body);
+      if (!input) return;
+
+      // 验证课程归属
+      const [rows]: any = await pool.query('SELECT id FROM courses WHERE id = ? AND user_id = ?', [
+        req.params.id,
+        req.userId,
+      ]);
+      if (rows.length === 0) return fail(res, 404, '课程不存在或无权操作');
+
+      const col = input.colorClass || 'bg-course-blue text-white';
+      await pool.query(
+        `UPDATE courses SET name=?, teacher=?, classroom=?, weekday=?, start_period=?, period_span=?,
+         week_start=?, week_end=?, week_type=?, course_type=?, color_class=?
+         WHERE id = ? AND user_id = ?`,
+        [
+          input.name, input.teacher, input.classroom, input.weekday, input.startPeriod,
+          input.periodSpan, input.weekStart, input.weekEnd, input.weekType, input.courseType,
+          col, req.params.id, req.userId,
+        ],
+      );
+      logger.business('课程编辑', { course_id: req.params.id, name: input.name, user_id: req.userId, trace_id: req._traceId });
+      ok(res, null, '已更新');
+    } catch (err: any) {
+      logger.error('编辑课程失败', { error: err.message, course_id: req.params.id, user_id: req.userId, trace_id: req._traceId});
+      fail(res, 500, '编辑失败');
+    }
+  });
+
   app.delete('/api/v1/courses/:id', auth, limiter(10), async (req: Request, res: Response) => {
     try {
       const [result]: any = await pool.query('DELETE FROM courses WHERE id = ? AND user_id = ?', [

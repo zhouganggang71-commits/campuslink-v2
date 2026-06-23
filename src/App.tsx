@@ -2,7 +2,7 @@
  * CampusLink 主入口 — 纯渲染，数据层和业务层已拆分到 hooks/
  */
 import { lazy, Suspense } from 'react';
-import { Listing } from './types';
+import { Listing, Course } from './types';
 import { useAppData, clearStorageCache } from './hooks/useAppData';
 import { useAppActions } from './hooks/useAppActions';
 import { setSession } from './utils/api';
@@ -111,6 +111,23 @@ export default function App() {
                 <ScheduleTab
                   courses={d.courses}
                   onAddCourse={() => d.setIsAddCourseOpen(true)}
+                  onEditCourse={(course: Course) => {
+                    d.setEditingCourseId(course.id);
+                    d.setCourseForm({
+                      name: course.name,
+                      teacher: course.teacher,
+                      classroom: course.classroom,
+                      weekday: course.weekday,
+                      startPeriod: course.startPeriod,
+                      periodSpan: course.periodSpan,
+                      weekStart: course.weekStart,
+                      weekEnd: course.weekEnd,
+                      weekType: course.weekType,
+                      courseType: course.courseType,
+                      colorClass: course.colorClass,
+                    });
+                    d.setIsAddCourseOpen(true);
+                  }}
                   onImportCourses={a.handleImportCourses}
                   onShareSchedule={a.handleShareSchedule}
                   onDeleteCourse={a.handleDeleteCourse}
@@ -149,6 +166,7 @@ export default function App() {
                 messages={d.messages}
                 onMarkRead={a.handleMarkMessageRead}
                 onMarkAllRead={a.handleMarkAllRead}
+                onDeleteMessage={a.handleDeleteMessage}
               />
             </div>
 
@@ -217,13 +235,14 @@ export default function App() {
 
       <AddCourseModal
         isOpen={d.isAddCourseOpen}
-        onClose={() => d.setIsAddCourseOpen(false)}
+        onClose={() => { d.setIsAddCourseOpen(false); d.setEditingCourseId(null); }}
         onSubmit={(e: any) => {
           e.preventDefault();
           a.handleAddCourse();
         }}
         form={d.courseForm}
         onChange={(updates: any) => d.setCourseForm((prev: any) => ({ ...prev, ...updates }))}
+        editMode={!!d.editingCourseId}
       />
 
       <ShareScheduleModal

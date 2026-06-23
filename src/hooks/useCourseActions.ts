@@ -11,6 +11,8 @@ interface CourseDataLayer {
   setIsShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setShareWeek: React.Dispatch<React.SetStateAction<number>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  editingCourseId: string | null;
+  setEditingCourseId: React.Dispatch<React.SetStateAction<string | null>>;
   courseForm: {
     name: string;
     teacher: string;
@@ -44,16 +46,14 @@ export function useCourseActions(d: CourseDataLayer) {
     const ws = Number(weekStart);
     const we = Number(weekEnd);
 
-    // ── 时间冲突检测 ──
+    // ── 时间冲突检测（编辑模式跳过与自身冲突）──
     const conflict = d.courses.find((c) => {
+      if (d.editingCourseId && c.id === d.editingCourseId) return false;
       if (c.weekday !== wd) return false;
-      // 时间段重叠检查
       const cEnd = c.startPeriod + c.periodSpan;
       const nEnd = sp + ps;
       if (nEnd <= c.startPeriod || sp >= cEnd) return false;
-      // 周类型兼容（all 与任何冲突，odd 与 odd 冲突，even 与 even 冲突）
       if (weekType !== 'all' && c.weekType !== 'all' && c.weekType !== weekType) return false;
-      // 周范围重叠
       if (ws > c.weekEnd || we < c.weekStart) return false;
       return true;
     });
@@ -62,23 +62,46 @@ export function useCourseActions(d: CourseDataLayer) {
       const dayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
       const conflictRange = `${conflict.startPeriod}-${conflict.startPeriod + conflict.periodSpan}节`;
       d.showToast(`与「${conflict.name}」冲突（${dayNames[conflict.weekday]} ${conflictRange}），请修改时间`, 'info');
-      return; // 不关闭弹窗，让用户修改
+      return;
     }
 
-    const prevCourses = d.courses;
-    const newCourse: Course = {
-      id: `course-${Date.now()}`,
+    const courseData = {
       name: d.courseForm.name,
       teacher: d.courseForm.teacher,
       classroom: d.courseForm.classroom,
-      weekday: Number(d.courseForm.weekday),
-      startPeriod: Number(d.courseForm.startPeriod),
-      periodSpan: Number(d.courseForm.periodSpan),
-      weekStart: Number(d.courseForm.weekStart),
-      weekEnd: Number(d.courseForm.weekEnd),
+      weekday: wd,
+      startPeriod: sp,
+      periodSpan: ps,
+      weekStart: ws,
+      weekEnd: we,
       weekType: d.courseForm.weekType,
       courseType: d.courseForm.courseType,
       colorClass: d.courseForm.colorClass,
+    };
+
+    // ── 编辑模式：乐观更新 + PUT ──
+    if (d.editingCourseId) {
+      const prevCourses = d.courses;
+      d.setCourses(d.courses.map((c) =>
+        c.id === d.editingCourseId ? { ...c, ...courseData } : c,
+      ));
+      api.put(`/courses/${d.editingCourseId}`, courseData)
+        .then(() => d.showToast('课程已更新', 'success'))
+        .catch(() => {
+          d.setCourses(prevCourses);
+          d.showToast('更新失败，请重试', 'info');
+        });
+      d.setEditingCourseId(null);
+      d.setIsAddCourseOpen(false);
+      d.setCourseForm({ name: '', teacher: '', classroom: '', weekday: 3, startPeriod: 3, periodSpan: 2, weekStart: 1, weekEnd: 18, weekType: 'all', courseType: 'theory', colorClass: 'bg-course-blue text-white' });
+      return;
+    }
+
+    // ── 新增模式 ──
+    const prevCourses = d.courses;
+    const newCourse: Course = {
+      id: `course-${Date.now()}`,
+      ...courseData,
     };
     d.setCourses([...d.courses, newCourse]);
     api
