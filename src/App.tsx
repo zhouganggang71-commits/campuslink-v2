@@ -130,6 +130,7 @@ export default function App() {
                   isOrg={!!d.profile.orgLevel && !!d.profile.position}
                   isVerified={d.profile.isVerified}
                   editListing={d.editingListing}
+                  showToast={d.showToast}
                 />
               )}
             </div>

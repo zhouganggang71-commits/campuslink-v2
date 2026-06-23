@@ -31,6 +31,7 @@ installGlobalHandlers();
 setLogDir(path.join(process.cwd(), "logs"));
 
 const app = express();
+app.set('trust proxy', 1); // 信任 nginx 反代一跳，使 req.ip 获取真实客户端 IP
 app.disable("x-powered-by");
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
@@ -132,43 +133,51 @@ const pdfUpload = multer({
 
 // ── 健康检查（含连接池+内存） ──
 const startTime = Date.now();
+const HEALTH_KEY = process.env.HEALTH_KEY || process.env.ADMIN_KEY || '';
 
 app.get("/api/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
-    const mem = process.memoryUsage();
-    // 连接池内省（安全取，取不到不报错）
-    let poolStats = { total: 0, free: 0, waiting: 0 };
-    try {
-      const internal: any = (pool as any).pool;
-      if (internal) {
-        poolStats.total = internal._allConnections?.length || 0;
-        poolStats.free = internal._freeConnections?.length || 0;
-        poolStats.waiting = internal._connectionQueue?.length || 0;
-      }
-    } catch { /* 内省失败不影响响应 */ }
-    res.json({
-      code: 0,
-      message: "ok",
-      db: "connected",
-      uptime: Math.floor((Date.now() - startTime) / 1000),
-      pool: { active: poolStats.total - poolStats.free, total: poolStats.total, waiting: poolStats.waiting },
-      memory: { heap: Math.round(mem.heapUsed / 1024 / 1024) + "MB", rss: Math.round(mem.rss / 1024 / 1024) + "MB" },
-    });
+    const key = (req.query.key as string) || '';
+    // 详细状态仅响应持有健康检查密钥的请求
+    if (HEALTH_KEY && key === HEALTH_KEY) {
+      const mem = process.memoryUsage();
+      let poolStats = { total: 0, free: 0, waiting: 0 };
+      try {
+        const internal: any = (pool as any).pool;
+        if (internal) {
+          poolStats.total = internal._allConnections?.length || 0;
+          poolStats.free = internal._freeConnections?.length || 0;
+          poolStats.waiting = internal._connectionQueue?.length || 0;
+        }
+      } catch { /* 内省失败不影响响应 */ }
+      return res.json({
+        code: 0,
+        message: "ok",
+        db: "connected",
+        uptime: Math.floor((Date.now() - startTime) / 1000),
+        pool: { active: poolStats.total - poolStats.free, total: poolStats.total, waiting: poolStats.waiting },
+        memory: { heap: Math.round(mem.heapUsed / 1024 / 1024) + "MB", rss: Math.round(mem.rss / 1024 / 1024) + "MB" },
+      });
+    }
+    // 公开端点仅返回基本状态
+    res.json({ code: 0, message: "ok", db: "connected" });
   } catch (err: any) {
     logger.error('健康检查失败', { error: err.message, trace_id: (req as any)._traceId });
-    res.status(500).json({ code: -1, error: "db error", detail: err.message });
+    res.status(500).json({ code: -1, error: "db error" });
   }
 });
 
 // ── 前端错误上报 ──
 app.post("/api/log/client-error", (req: any, res: any) => {
   const { message, stack, component, url } = req.body || {};
+  // 脱敏：移除 URL 中的 token、key 等敏感参数
+  const safeUrl = (url || '').replace(/([?&](token|key|password|secret|auth)=)[^&]*/gi, '$1***');
   logger.client("前端异常", {
     message: message?.slice(0, 500),
     stack: stack?.slice(0, 1000),
     component,
-    url,
+    url: safeUrl,
     trace_id: req._traceId,
     session_id: req._sessionId,
   });

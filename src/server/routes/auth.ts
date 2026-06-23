@@ -96,6 +96,9 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       const isAdmin = !!user.is_admin;
       const accessToken = signAccessToken(user.id, isAdmin);
       const refreshToken = signRefreshToken(user.id);
+      // 设备指纹：User-Agent 前 180 字符 + IP
+      const deviceInfo = ((req.headers['user-agent'] as string) || '').slice(0, 180) || null;
+      const clientIp = req.ip || req.socket.remoteAddress || '';
 
       // 事务：refresh_token 写入（删除旧 token + 插入新 token 原子操作）
       // 注意：users 表 INSERT/UPDATE 在事务外执行（不影响登录功能）
@@ -103,11 +106,10 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       try {
         await conn.beginTransaction();
         await conn.query('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
-        await conn.query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, FROM_UNIXTIME(?))', [
-          user.id,
-          refreshToken,
-          Math.floor(Date.now() / 1000) + 2592000,
-        ]);
+        await conn.query(
+          'INSERT INTO refresh_tokens (user_id, token, expires_at, device_info, ip_address) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?)',
+          [user.id, refreshToken, Math.floor(Date.now() / 1000) + 2592000, deviceInfo, clientIp],
+        );
         await conn.commit();
 
         // 记录登录时间和IP（事务外，不影响登录）
@@ -147,21 +149,38 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       const [rows]: any = await pool.query('SELECT * FROM refresh_tokens WHERE token = ?', [input.refresh_token]);
       if (rows.length === 0) return fail(res, 401, 'Token 已被撤销');
 
+      const currentIp = req.ip || req.socket.remoteAddress || '';
+      const storedIp = rows[0].ip_address;
+      // IP 变更告警（不拒绝，移动网络 IP 常变，但记录安全日志）
+      if (storedIp && currentIp && storedIp !== currentIp) {
+        logger.security('Refresh Token IP变更', {
+          user_id: payload.uid,
+          stored_ip: storedIp,
+          current_ip: currentIp,
+          trace_id: req._traceId,
+        });
+      }
+
       const [userRows]: any = await pool.query('SELECT * FROM users WHERE id = ?', [payload.uid]);
       if (userRows.length === 0) return fail(res, 404, '用户不存在');
 
       const user = userRows[0];
       const isAdmin = !!user.is_admin;
 
+      const deviceInfo = ((req.headers['user-agent'] as string) || '').slice(0, 180) || null;
+      // 记录旧 token 使用次数
+      await pool.query(
+        'UPDATE refresh_tokens SET last_used_at = NOW(), use_count = use_count + 1 WHERE token = ?',
+        [input.refresh_token],
+      ).catch(() => {});
       await pool.query('DELETE FROM refresh_tokens WHERE token = ?', [input.refresh_token]);
 
       const newAccess = signAccessToken(user.id, isAdmin);
       const newRefresh = signRefreshToken(user.id);
-      await pool.query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, FROM_UNIXTIME(?))', [
-        user.id,
-        newRefresh,
-        Math.floor(Date.now() / 1000) + 2592000,
-      ]);
+      await pool.query(
+        'INSERT INTO refresh_tokens (user_id, token, expires_at, device_info, ip_address) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?)',
+        [user.id, newRefresh, Math.floor(Date.now() / 1000) + 2592000, deviceInfo, currentIp],
+      );
 
       logger.business('Token刷新', { user_id: user.id, trace_id: req._traceId });
       ok(res, { token: newAccess, refresh_token: newRefresh, isAdmin });

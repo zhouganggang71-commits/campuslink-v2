@@ -72,6 +72,7 @@ export default function ListingDetail({
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
+      {listing.imageUrls.length > 0 && (
       <section
         className="relative w-full aspect-square bg-gray-100 overflow-hidden"
         onTouchStart={listing.imageUrls.length > 1 ? handleTouchStart : undefined}
@@ -86,8 +87,7 @@ export default function ListingDetail({
               : `translateX(-${carouselIndex * 100}%)`,
           }}
         >
-          {listing.imageUrls.length > 0 ? (
-            listing.imageUrls.map((url, i) => (
+          {listing.imageUrls.map((url, i) => (
               <img
                 key={i}
                 src={url}
@@ -95,12 +95,7 @@ export default function ListingDetail({
                 className="w-full h-full object-cover shrink-0 select-none"
                 referrerPolicy="no-referrer"
               />
-            ))
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-slate-200 text-gray-400">
-              <Icon name="image" className="text-6xl" />
-            </div>
-          )}
+            ))}
         </div>
         {listing.imageUrls.length > 1 && (
           <>
@@ -130,6 +125,7 @@ export default function ListingDetail({
           </div>
         )}
       </section>
+      )}
 
       <section className="p-4 bg-white border-b border-gray-100">
         <div className="flex items-center gap-2 mb-2">

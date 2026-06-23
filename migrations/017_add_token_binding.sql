@@ -1,0 +1,6 @@
+-- 016: 为 refresh_tokens 添加设备绑定字段
+ALTER TABLE refresh_tokens
+  ADD COLUMN IF NOT EXISTS device_info VARCHAR(200) DEFAULT NULL COMMENT '设备指纹（User-Agent 摘要）',
+  ADD COLUMN IF NOT EXISTS ip_address VARCHAR(50) DEFAULT NULL COMMENT '签发时的客户端IP',
+  ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP NULL DEFAULT NULL COMMENT '最近一次使用时间',
+  ADD COLUMN IF NOT EXISTS use_count INT DEFAULT 0 COMMENT '使用次数';

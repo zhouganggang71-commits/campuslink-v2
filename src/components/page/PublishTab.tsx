@@ -1,6 +1,7 @@
 import { useState, FormEvent, useEffect, useRef, useCallback } from 'react';
 import { Listing, ORGANIZATIONS } from '../../types';
 import { api } from '../../utils/api';
+import { checkSensitive } from '../../utils/sensitiveFilter';
 import Icon from '../ui/Icon';
 
 // ── 草稿持久化 ──
@@ -81,9 +82,10 @@ interface PublishTabProps {
   isOrg: boolean;
   isVerified: boolean;
   editListing?: Listing | null;
+  showToast?: (msg: string, type?: 'success' | 'info') => void;
 }
 
-export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, editListing }: PublishTabProps) {
+export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, editListing, showToast }: PublishTabProps) {
   const DEFAULT_FORM: Record<string, string> = {
     postType: 'sell',
     title: '',
@@ -165,7 +167,9 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
   const compressImage = (file: File): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
       img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
         const MAX = 1920;
         let { width, height } = img;
         if (width > MAX || height > MAX) {
@@ -183,8 +187,8 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
           else reject(new Error('压缩失败'));
         }, 'image/jpeg', 0.8);
       };
-      img.onerror = () => reject(new Error('图片加载失败'));
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('图片加载失败')); };
+      img.src = objectUrl;
     });
   };
 
@@ -216,6 +220,14 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
 
     const pt = ft('postType') as Listing['postType'];
     if (pt === 'sell' && !ft('price')) return;
+
+    // ── 违禁词检查 ──
+    const combinedText = [ft('title'), ft('description'), ft('contactInfo')].join(' ');
+    const result = checkSensitive(combinedText);
+    if (!result.passed) {
+      showToast?.(`内容包含违禁词：${result.hitWords.slice(0, 3).join('、')}`, 'info');
+      return;
+    }
 
     // Build title and description dynamically per type
     const title = ft('title');
@@ -251,19 +263,14 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
         break;
     }
 
-    let finalImg = ft('imageUrl');
-    if (!finalImg) {
-      if (pt === 'activity') finalImg = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800';
-      else if (pt === 'study') finalImg = 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800';
-      else finalImg = 'https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=800';
-    }
+    const finalImg = ft('imageUrl') || '';
 
     onPublish({
       title,
       price,
       originalPrice: pt === 'sell' && ft('originalPrice') ? parseFloat(ft('originalPrice')) : undefined,
       description,
-      imageUrls: [finalImg],
+      imageUrls: finalImg ? [finalImg] : [],
       category,
       postType: pt,
       publisherName: '当前用户',

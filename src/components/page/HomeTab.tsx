@@ -123,11 +123,14 @@ export default function HomeTab({
     >
       {/* ── 下拉刷新指示器 ── */}
       <div
-        className="flex items-center justify-center transition-all duration-200 overflow-hidden"
+        className="flex items-center justify-center gap-2 transition-all duration-200 overflow-hidden"
         style={{ height: pullDistance, opacity: pullDistance / PULL_THRESHOLD }}
       >
-        <div className={`w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full ${refreshing ? 'animate-spin' : ''}`}
+        <div className={`w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full ${refreshing ? 'animate-spin' : ''}`}
           style={{ transform: `rotate(${pullDistance * 3}deg)` }} />
+        <span className="text-[11px] text-primary/60 font-semibold">
+          {refreshing ? '刷新中...' : pullDistance >= PULL_THRESHOLD ? '松开刷新' : '下拉刷新'}
+        </span>
       </div>
 
       <div className="p-4 flex flex-col gap-3">

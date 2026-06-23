@@ -127,7 +127,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
 
       const [result]: any = await pool.query(
         `INSERT INTO posts (user_id, title, description, price, original_price, category, post_type, image_urls, contact_info, status, is_official, title_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', false, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', false, ?)`,
         [
           req.userId,
           input.title,

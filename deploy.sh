@@ -49,7 +49,8 @@ BACKUP_KEY=$(grep ENCRYPTION_KEY .env | cut -d= -f2)
 DB_PW=$(grep CAMPUSLINK_DB_PW .env | cut -d= -f2)
 ssh "$N100" "
   mkdir -p $APP/backups
-  mysqldump -u campuslink -p${DB_PW} campuslink | openssl enc -aes-256-cbc -pbkdf2 -pass pass:${BACKUP_KEY} -out $APP/backups/campuslink-\$(date +%Y%m%d-%H%M).sql.enc
+  export MYSQL_PWD='${DB_PW}'
+  mysqldump -u campuslink campuslink | openssl enc -aes-256-cbc -pbkdf2 -pass pass:${BACKUP_KEY} -out $APP/backups/campuslink-\$(date +%Y%m%d-%H%M).sql.enc
   cd $APP/backups && ls -t *.sql.enc | tail -n +8 | xargs -r rm
   echo \"  备份完成: \$(ls -t *.sql.enc | head -1)\"
 "

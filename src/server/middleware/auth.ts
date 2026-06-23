@@ -26,6 +26,13 @@ export function auth(req: Request, res: Response, next: NextFunction) {
 
   const adminKey = process.env.ADMIN_KEY;
   if (adminKey && token === adminKey) {
+    // 紧急恢复密钥：仅限本机访问，记录审计日志
+    const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+    if (!isLocal) {
+      logger.security('ADMIN_KEY 远程访问被拒', { ip: req.ip, path: req.originalUrl, trace_id: req._traceId });
+      return res.status(403).json({ code: -1, message: 'ADMIN_KEY 仅限本机使用' });
+    }
+    logger.security('ADMIN_KEY 本机认证（紧急恢复）', { path: req.originalUrl, ip: req.ip, trace_id: req._traceId });
     req.userId = 0;
     req.isAdmin = true;
     req.isVerified = true;
@@ -69,7 +76,15 @@ export function adminAuth(req: Request, res: Response, next: NextFunction) {
   }
 
   const adminKey = process.env.ADMIN_KEY;
-  if (adminKey && token === adminKey) return next();
+  if (adminKey && token === adminKey) {
+    const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+    if (!isLocal) {
+      logger.security('ADMIN_KEY 远程访问管理接口被拒', { ip: req.ip, path: req.originalUrl, trace_id: req._traceId });
+      return res.status(403).json({ code: -1, message: 'ADMIN_KEY 仅限本机使用' });
+    }
+    logger.security('ADMIN_KEY 本机管理认证（紧急恢复）', { path: req.originalUrl, trace_id: req._traceId });
+    return next();
+  }
 
   const user = verifyAccessToken(token);
   if (!user) {
