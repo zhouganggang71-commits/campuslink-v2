@@ -42,11 +42,14 @@ function StatusBadge({ status }: { status: string }) {
 function ContentCard({ item, onClick, rightSlot, children }: {
   item: Listing; onClick: () => void; rightSlot?: React.ReactNode; children?: React.ReactNode;
 }) {
+  const [imgError, setImgError] = useState(false);
+  const thumbUrl = item.imageUrls?.[0] || '';
+  const showImg = !!(thumbUrl && thumbUrl.startsWith('http') && !imgError);
   return (
     <div className="bg-white border border-gray-100 rounded-xl p-3 flex gap-3 hover:shadow-md hover:border-gray-200 transition-all active:scale-[0.98]">
       <div onClick={onClick} className="aspect-square w-16 h-16 rounded-lg bg-slate-100 shrink-0 overflow-hidden cursor-pointer">
-        {item.imageUrls.length > 0 ? (
-          <img src={item.imageUrls[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        {showImg ? (
+          <img src={thumbUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={() => setImgError(true)} />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-300"><Icon name="image" className="text-2xl" /></div>
         )}
