@@ -169,14 +169,49 @@ export default function ProfileTab({
   const [editingBio, setEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState(profile.bio || '');
 
+  // HEIC → JPEG 转换
+  const convertHeicToJpeg = (file: File): Promise<Blob> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX = 1920;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas 不可用')); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('转换失败')), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
+
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    let file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { onShowToast('请选择图片文件'); return; }
     if (file.size > 2 * 1024 * 1024) { onShowToast('图片不能超过2MB'); return; }
     setAvatarUploading(true);
     setAvatarError(false);
     try {
+      // HEIC/HEIF 自动转 JPEG
+      if (file.type === 'image/heic' || file.type === 'image/heif') {
+        file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+      }
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+        onShowToast('仅支持 JPG/PNG/WebP/GIF 格式');
+        setAvatarUploading(false);
+        return;
+      }
       const form = new FormData();
       form.append('avatar', file);
       const res = await api.upload<{ avatar_url: string }>('/auth/avatar', form);
@@ -192,13 +227,21 @@ export default function ProfileTab({
   };
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    let file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { onShowToast('请选择图片文件'); return; }
     if (file.size > 4 * 1024 * 1024) { onShowToast('封面不能超过4MB'); return; }
     setCoverUploading(true);
     setCoverError(false);
     try {
+      // HEIC/HEIF 自动转 JPEG
+      if (file.type === 'image/heic' || file.type === 'image/heif') {
+        file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+      }
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+        onShowToast('仅支持 JPG/PNG/WebP/GIF 格式');
+        setCoverUploading(false);
+        return;
+      }
       const form = new FormData();
       form.append('cover', file);
       const res = await api.upload<{ cover_url: string }>('/auth/cover', form);
