@@ -124,7 +124,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
         {images.length > 0 && (
           <div className="px-4 pb-3">
             <div className={`grid gap-1.5 ${images.length === 1 ? '' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-              {images.map((url, i) => (
+              {images.slice(0, 9).map((url, i) => (
                 <div key={i} className="aspect-square rounded-lg overflow-hidden bg-slate-100">
                   <img src={url} alt="" className="w-full h-full object-cover" />
                 </div>

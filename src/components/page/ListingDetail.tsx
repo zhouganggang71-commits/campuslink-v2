@@ -1,6 +1,7 @@
 import { useState, lazy, Suspense, useRef, useCallback } from 'react';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
+import UserProfileModal from '../modal/UserProfileModal';
 
 const RegisterPanel = lazy(() => import('./RegisterPanel'));
 
@@ -38,6 +39,7 @@ export default function ListingDetail({
   const isSaved = savedListingIds.includes(listing.id);
   const isReal = /^\d+$/.test(listing.id); // 真实帖子 ID 为纯数字，mock 数据 ID 如 headphones-1 非数字
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [showPublisherProfile, setShowPublisherProfile] = useState(false);
   const isOwn = listing.publisherName === currentUserName;
 
   // ── 手势滑动 ──
@@ -206,24 +208,30 @@ export default function ListingDetail({
       <section className="p-4 bg-white flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
-              src={listing.publisherAvatar}
-              alt={listing.publisherName}
-              className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm"
-              referrerPolicy="no-referrer"
-            />
-            <div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-headline font-semibold text-sm">{listing.publisherName}</span>
-                {listing.isVerifiedStudent && (
-                  <span className="bg-course-green text-white text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                    <Icon name="verified" className="text-[10px]" />
-                    已认证
-                  </span>
-                )}
+            <button
+              onClick={() => listing.publisherId > 0 && setShowPublisherProfile(true)}
+              disabled={listing.publisherId <= 0}
+              className={`flex items-center gap-3 text-left ${listing.publisherId > 0 ? 'cursor-pointer hover:opacity-80 active:scale-95 transition-all' : 'cursor-default'}`}
+            >
+              <img
+                src={listing.publisherAvatar}
+                alt={listing.publisherName}
+                className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm"
+                referrerPolicy="no-referrer"
+              />
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-headline font-semibold text-sm">{listing.publisherName}</span>
+                  {listing.isVerifiedStudent && (
+                    <span className="bg-course-green text-white text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                      <Icon name="verified" className="text-[10px]" />
+                      已认证
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
               </div>
-              <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
-            </div>
+            </button>
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
@@ -302,6 +310,22 @@ export default function ListingDetail({
           </div>
         )}
       </div>
+
+      {/* 发帖人主页弹窗 */}
+      <UserProfileModal
+        isOpen={showPublisherProfile}
+        onClose={() => setShowPublisherProfile(false)}
+        userId={listing.publisherId}
+        placeholder={{
+          name: listing.publisherName,
+          avatar: listing.publisherAvatar,
+          isVerified: listing.isVerifiedStudent,
+          department: listing.department,
+          orgLevel: listing.publisherOrgLevel,
+          orgName: listing.orgName,
+          position: listing.publisherPosition,
+        }}
+      />
     </div>
   );
 }

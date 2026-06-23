@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN org_name VARCHAR(100) DEFAULT '' AFTER position;

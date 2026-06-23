@@ -11,6 +11,7 @@ export const loginSchema = z.object({
   password: z.string().min(6, '密码至少6位').max(100),
   department: z.string().max(128).optional(),
   orgLevel: z.enum(['校级','院级','']).optional(),
+  orgName: z.string().max(100).optional(),
   position: z.string().max(20).optional(),
   confidence: z.enum(['high','medium','low']).optional(),
 });

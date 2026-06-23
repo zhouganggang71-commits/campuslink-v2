@@ -131,6 +131,7 @@ export function usePostActions(d: PostDataLayer) {
       ...newListing,
       id: listingId,
       status: 'active',
+      publisherId: 0,
       publisherName: d.profile.fullName,
       publisherAvatar: d.profile.avatarUrl,
       isVerifiedStudent: d.profile.isVerified,

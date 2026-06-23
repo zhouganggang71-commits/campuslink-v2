@@ -309,6 +309,7 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
       imageUrls: finalImg ? [finalImg] : [],
       category,
       postType: pt,
+      publisherId: 0,
       publisherName: '当前用户',
       publisherAvatar: '',
       isVerifiedStudent: isVerified,

@@ -1,7 +1,7 @@
 /**
  * CampusLink 主入口 — 纯渲染，数据层和业务层已拆分到 hooks/
  */
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useCallback } from 'react';
 import { Listing, Course } from './types';
 import { useAppData, clearStorageCache } from './hooks/useAppData';
 import { useAppActions } from './hooks/useAppActions';
@@ -46,6 +46,8 @@ export default function App() {
   const d = useAppData();
   const a = useAppActions(d);
 
+  const clearListing = useCallback(() => d.setSelectedListing(null), [d.setSelectedListing]);
+
   return (
     <div className="w-full min-h-screen bg-slate-50 text-on-surface font-sans antialiased pb-20 flex flex-col items-center">
       <OfflineBanner />
@@ -55,10 +57,10 @@ export default function App() {
         selectedListing={!!d.selectedListing}
         activeTab={d.activeTab}
         unreadCount={d.unreadCount}
-        onClearListing={() => d.setSelectedListing(null)}
+        onClearListing={clearListing}
         onMessagesClick={() => {
           d.setActiveTab('messages');
-          d.setSelectedListing(null);
+          clearListing();
         }}
       />
 
@@ -217,18 +219,20 @@ export default function App() {
         activeTab={d.activeTab}
         setActiveTab={d.setActiveTab}
         unreadCount={d.unreadCount}
-        setSelectedListing={() => d.setSelectedListing(null)}
+        setSelectedListing={clearListing}
       />
 
       <AuthModal
         isOpen={d.isAuthModalOpen}
         onClose={() => d.setIsAuthModalOpen(false)}
         onSubmit={a.handleAuth}
+        showToast={d.showToast}
         initialValues={{
           fullName: '周鉦罡',
           studentId: '202330140113',
           department: '财税学院',
           orgLevel: '院级',
+          orgName: '校学生会',
           position: '干事',
         }}
       />

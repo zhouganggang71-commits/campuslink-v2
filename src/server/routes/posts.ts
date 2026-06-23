@@ -57,7 +57,12 @@ export function registerPostRoutes(app: any, pool: Pool) {
       if (sort === 'time') orderBy = 'ORDER BY is_official DESC, created_at DESC';
       if (sort === 'hot') orderBy = 'ORDER BY views DESC, created_at DESC';
 
-      const [rows]: any = await pool.query(`SELECT * FROM posts ${where} ${orderBy} LIMIT ? OFFSET ?`, [
+      const joinedSelect = `SELECT p.*, u.nickname AS publisher_name, u.avatar_url AS publisher_avatar,
+        u.department AS publisher_department, u.org_level AS publisher_org_level,
+        u.org_name AS publisher_org_name, u.position AS publisher_position,
+        u.auth_status AS publisher_auth_status
+        FROM posts p LEFT JOIN users u ON p.user_id = u.id`;
+      const [rows]: any = await pool.query(`${joinedSelect} ${where} ${orderBy} LIMIT ? OFFSET ?`, [
         ...params,
         limit,
         offset,
@@ -73,7 +78,14 @@ export function registerPostRoutes(app: any, pool: Pool) {
   // 详情
   app.get('/api/v1/posts/:id', async (req: Request, res: Response) => {
     try {
-      const [rows]: any = await pool.query('SELECT * FROM posts WHERE id = ?', [req.params.id]);
+      const [rows]: any = await pool.query(
+        `SELECT p.*, u.nickname AS publisher_name, u.avatar_url AS publisher_avatar,
+         u.department AS publisher_department, u.org_level AS publisher_org_level,
+         u.org_name AS publisher_org_name, u.position AS publisher_position,
+         u.auth_status AS publisher_auth_status
+         FROM posts p LEFT JOIN users u ON p.user_id = u.id WHERE p.id = ?`,
+        [req.params.id],
+      );
       if (rows.length === 0) return notFound(res, '帖子不存在');
       await pool.query('UPDATE posts SET views = views + 1 WHERE id = ?', [req.params.id]);
       rows[0].views += 1;

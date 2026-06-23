@@ -20,6 +20,7 @@ export function useAuthActions(d: AuthDataLayer) {
     studentId: string,
     department: string,
     orgLevel: string,
+    orgName: string,
     position: string,
     password: string,
     confidence: string,
@@ -30,6 +31,7 @@ export function useAuthActions(d: AuthDataLayer) {
       password,
       department,
       orgLevel,
+      orgName,
       position,
       confidence: confidence || undefined,
     });
@@ -49,6 +51,7 @@ export function useAuthActions(d: AuthDataLayer) {
         department: res.data?.user?.department || department,
         studentId,
         orgLevel: (res.data?.user?.orgLevel || orgLevel) as OrgLevel,
+        orgName: res.data?.user?.orgName || orgName || '',
         position: (res.data?.user?.position || position) as Position,
         isVerified: verified,
         isAdmin: !!res.data?.user?.isAdmin,

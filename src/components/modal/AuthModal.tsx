@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { DEPARTMENTS, POSITIONS, ORG_LEVELS } from '../../types';
+import { DEPARTMENTS, POSITIONS, ORG_LEVELS, ORGANIZATIONS } from '../../types';
 import Icon from '../ui/Icon';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -12,18 +12,21 @@ interface AuthModalProps {
     studentId: string,
     department: string,
     orgLevel: string,
+    orgName: string,
     position: string,
     password: string,
     confidence: string,
   ) => void;
-  initialValues: { fullName: string; studentId: string; department: string; orgLevel: string; position: string };
+  initialValues: { fullName: string; studentId: string; department: string; orgLevel: string; orgName: string; position: string };
+  showToast: (msg: string, type?: 'success' | 'info') => void;
 }
 
-export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, onSubmit, initialValues, showToast }: AuthModalProps) {
   const [fullName, setFullName] = useState(initialValues.fullName);
   const [studentId, setStudentId] = useState(initialValues.studentId);
   const [department, setDepartment] = useState(initialValues.department);
   const [orgLevel, setOrgLevel] = useState(initialValues.orgLevel);
+  const [orgName, setOrgName] = useState(initialValues.orgName);
   const [position, setPosition] = useState(initialValues.position);
   const [isLogin, setIsLogin] = useState(true);
   const [password, setPassword] = useState('');
@@ -38,17 +41,19 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // 预览
     const reader = new FileReader();
     reader.onload = () => {
       setPhotoPreview(reader.result as string);
       setPhotoUploaded(true);
     };
     reader.readAsDataURL(file);
-    // 自动识图填充
+    // 自动识图填充（压缩上传，绕过 nginx 1MB 限制）
     setOcrLoading(true);
     try {
+      const blob = await compressImage(file);
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', blob, 'student-id.jpg');
       const resp = await fetch('/campus/api/v1/ocr-student-id', { method: 'POST', body: fd });
       const data = await resp.json();
       if (data.code === 0 && data.data) {
@@ -63,20 +68,48 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
     setOcrLoading(false);
   };
 
+  // Canvas 压缩：长边最大 800px，JPEG quality 0.7
+  const compressImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 800;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Canvas 不可用'));
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((b) => b ? resolve(b) : reject(new Error('压缩失败')), 'image/jpeg', 0.7);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('加载失败')); };
+      img.src = url;
+    });
+  };
+
   const handleSubmit = () => {
-    if (!studentId.trim()) return;
-    if (!password.trim() || password.trim().length < 6) return;
+    if (!studentId.trim()) { showToast('请输入学号'); return; }
+    if (!password.trim() || password.trim().length < 6) { showToast('密码至少6位'); return; }
     if (!isLogin) {
-      if (!fullName.trim() || !department.trim()) return;
-      if (!photoUploaded) return;
-      if (ocrConfidence === 'low') return;
-      if (!agreedToTerms) return;
+      if (!fullName.trim()) { showToast('请输入真实姓名'); return; }
+      if (!department.trim()) { showToast('请选择院系'); return; }
+      if (!photoUploaded) { showToast('请上传学生证照片'); return; }
+      if (ocrConfidence === 'low') { showToast('学生证识别失败，请重新拍摄清晰照片'); return; }
+      if (!agreedToTerms) { showToast('请先阅读并同意免责声明'); return; }
     }
     onSubmit(
       isLogin ? fullName.trim() || '用户' : fullName.trim(),
       studentId.trim(),
       department.trim() || initialValues.department,
       isOrg ? orgLevel : '',
+      isOrg ? orgName : '',
       isOrg ? position : '',
       password.trim(),
       ocrConfidence || '',
@@ -96,7 +129,8 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
       title={isLogin ? '登录' : '学生身份认证'}
       subtitle={isLogin ? '已有账号直接登录' : '完成认证后发布信息带"已认证"标识'}
       footer={
-        <div className="flex gap-3">
+        <div>
+          <div className="flex gap-3">
           <Button variant="secondary" size="sm" block onClick={handleClose}>
             取消
           </Button>
@@ -109,6 +143,12 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
           >
             {isLogin ? '登录' : '提交审核'}
           </Button>
+          </div>
+          {!isLogin && (!studentId.trim() || password.trim().length < 6 || !agreedToTerms) && (
+            <p className="text-[10px] text-gray-400 text-center mt-2">
+              {!studentId.trim() ? '请填写学号' : password.trim().length < 6 ? '请设置至少6位密码' : '请勾选同意免责声明'}
+            </p>
+          )}
         </div>
       }
     >
@@ -179,6 +219,7 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
                 onClick={() => {
                   setIsOrg(false);
                   setOrgLevel('');
+                  setOrgName('');
                   setPosition('');
                 }}
                 className={`flex-1 py-2.5 text-sm font-semibold rounded-lg border cursor-pointer ${!isOrg ? 'bg-primary text-white border-primary' : 'bg-white text-gray-500 border-gray-200'}`}
@@ -197,6 +238,19 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues }: 
         )}
         {!isLogin && isOrg && (
           <>
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">具体组织</label>
+              <select
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all"
+              >
+                <option value="">请选择</option>
+                {ORGANIZATIONS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1">组织级别</label>
               <select

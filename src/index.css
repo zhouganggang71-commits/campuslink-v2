@@ -124,6 +124,10 @@ html {
     background: #94a3b8;
   }
 
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
   /* 暗色模式：滚动条 */
   .dark .custom-scrollbar::-webkit-scrollbar-thumb {
     background: #475569;

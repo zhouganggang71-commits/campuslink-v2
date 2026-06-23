@@ -50,12 +50,15 @@ export interface Listing {
   imageUrls: string[];
   category: string;
   postType: 'sell' | 'lost' | 'found' | 'carpool' | 'job' | 'activity' | 'study';
+  publisherId: number;
   publisherName: string;
   publisherAvatar: string;
   isVerifiedStudent: boolean;
   isOfficialOrg: boolean;
   orgName?: string;
   department?: Department;
+  publisherOrgLevel?: string;
+  publisherPosition?: string;
   publishedTimeText: string;
   views: number;
   favorites: number;
@@ -95,6 +98,7 @@ export interface StudentProfile {
   studentId: string;
   department: string;
   orgLevel: OrgLevel;
+  orgName: string;
   position: Position | '';
   avatarUrl: string;
   bio: string;

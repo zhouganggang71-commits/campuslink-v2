@@ -103,7 +103,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
     try {
       const status = (req.query.status as string) || 'all';
       const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
-      let query = 'SELECT id, student_id, nickname, auth_status, is_admin, department, org_level, position, created_at FROM users';
+      let query = 'SELECT id, student_id, nickname, auth_status, is_admin, department, org_level, org_name, position, created_at FROM users';
       const params: any[] = [];
       if (status !== 'all') {
         query += ' WHERE auth_status = ?';

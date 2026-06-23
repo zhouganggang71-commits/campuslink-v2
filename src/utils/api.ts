@@ -113,7 +113,7 @@ async function request<T>(
       }
     }
 
-    if (resp.status === 401) {
+    if (resp.status === 401 && path !== '/auth/dev-login') {
       setSession(null, null);
       return { code: -1, message: '未登录' };
     }
@@ -148,7 +148,7 @@ async function uploadRequest<T>(
       }
     }
 
-    if (resp.status === 401) {
+    if (resp.status === 401 && path !== '/auth/dev-login') {
       setSession(null, null);
       return { code: -1, message: '未登录' };
     }

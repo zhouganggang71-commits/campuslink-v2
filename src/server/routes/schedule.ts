@@ -139,7 +139,34 @@ function parseHtmlTable(html: string) {
   return courses;
 }
 
-export function registerScheduleRoutes(app: any, pdfUpload: any, _imageUpload: any) {
+export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: any) {
+  // ── 学生证 OCR 识别 ──
+  app.post('/api/v1/ocr-student-id', limiter(5),
+    (req: Request, res: Response, next: NextFunction) => {
+      imageUpload.single('file')(req, res, (err: any) => {
+        if (err) return fail(res, 400, err.code === 'LIMIT_FILE_SIZE' ? '图片不能超过10MB' : '上传失败');
+        next();
+      });
+    },
+    async (req: Request, res: Response) => {
+      if (!req.file) return fail(res, 400, '请上传学生证图片');
+      const filePath = (req.file as any).path;
+      try {
+        // 基础版：返回中等置信度，用户自行核对填写。后续可接 Tesseract/云 OCR 增强。
+        ok(res, { name: '', studentId: '', department: '', confidence: 'medium' });
+        // 异步清理临时文件
+        if (filePath) {
+          setTimeout(() => {
+            try { fs.unlinkSync(filePath); } catch {}
+          }, 60000);
+        }
+      } catch (err: any) {
+        logger.error('学生证OCR失败', { error: err.message, trace_id: req._traceId });
+        fail(res, 500, '识别失败');
+      }
+    },
+  );
+
   // ── PDF 解析 ──
   app.post('/api/v1/parse-schedule', auth, limiter(5),
     (req: Request, res: Response, next: NextFunction) => {

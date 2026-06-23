@@ -38,12 +38,12 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${info.cls}`}>{info.label}</span>;
 }
 
-// ── 缩略图列表项 ──
-function ThumbListItem({ item, onClick, rightSlot, children }: {
+// ── 内容卡片 ──
+function ContentCard({ item, onClick, rightSlot, children }: {
   item: Listing; onClick: () => void; rightSlot?: React.ReactNode; children?: React.ReactNode;
 }) {
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-3 flex gap-3 hover:shadow-sm transition-all">
+    <div className="bg-white border border-gray-100 rounded-xl p-3 flex gap-3 hover:shadow-md hover:border-gray-200 transition-all active:scale-[0.98]">
       <div onClick={onClick} className="aspect-square w-16 h-16 rounded-lg bg-slate-100 shrink-0 overflow-hidden cursor-pointer">
         {item.imageUrls.length > 0 ? (
           <img src={item.imageUrls[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -67,6 +67,24 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
       <Icon name={icon} className="text-5xl mb-3 text-gray-200" />
       <p className="text-xs">{text}</p>
     </div>
+  );
+}
+
+// ── 统计项（新设计） ──
+function StatItem({ count, label, icon, onClick, active }: {
+  count: number; label: string; icon: string; onClick: () => void; active: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center cursor-pointer transition-all px-4 py-2 rounded-xl min-w-[80px] ${
+        active ? 'bg-primary/5 text-primary' : 'text-gray-400 hover:text-gray-600 hover:bg-slate-50'
+      }`}
+    >
+      <Icon name={icon} className={`text-lg mb-0.5 ${active ? 'text-primary' : ''}`} />
+      <span className="font-headline text-lg font-bold">{count}</span>
+      <span className="text-[10px] font-medium mt-0.5">{label}</span>
+    </button>
   );
 }
 
@@ -94,6 +112,14 @@ const MENU_ITEMS = [
   { id: 'feedback' as const, icon: 'feedback', label: '问题反馈', desc: '联系管理员，提交反馈和建议' },
 ];
 
+// ── 封面渐变色方案 ──
+const COVER_GRADIENTS = [
+  'from-primary/80 via-primary to-primary/60',
+  'from-sky-400 via-indigo-500 to-purple-500',
+  'from-emerald-400 via-teal-500 to-cyan-500',
+  'from-rose-400 via-pink-500 to-orange-400',
+];
+
 // ── 主组件 ──
 export default function ProfileTab({
   profile, savedCount, listings, savedListings,
@@ -109,13 +135,23 @@ export default function ProfileTab({
   // ── 时间问候 ──
   const greeting = useMemo(() => {
     const h = new Date().getHours();
-    if (h < 6) return '夜深了，注意休息';
-    if (h < 9) return '早上好，新的一天';
-    if (h < 12) return '上午好，精力充沛';
-    if (h < 14) return '中午好，记得吃饭';
-    if (h < 18) return '下午好，继续加油';
-    return '晚上好，今天辛苦了';
+    if (h < 6) return '夜深了，注意休息 🌙';
+    if (h < 9) return '早上好，新的一天 ☀️';
+    if (h < 12) return '上午好，精力充沛 💪';
+    if (h < 14) return '中午好，记得吃饭 🍚';
+    if (h < 18) return '下午好，继续加油 🚀';
+    return '晚上好，今天辛苦了 ✨';
   }, []);
+
+  // 基于学号哈希选一个稳定的封面渐变
+  const coverGradient = useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < (profile.studentId || 'guest').length; i++) {
+      hash = ((hash << 5) - hash) + (profile.studentId || 'guest').charCodeAt(i);
+      hash |= 0;
+    }
+    return COVER_GRADIENTS[Math.abs(hash) % COVER_GRADIENTS.length];
+  }, [profile.studentId]);
 
   const myPostCount = listings.length;
   const myActivityIds = useMemo(() => listings.filter((l) => l.postType === 'activity').map((l) => l.id), [listings]);
@@ -176,11 +212,14 @@ export default function ProfileTab({
       }));
       return (
         <div className="flex-1 flex flex-col">
-          <div className="flex border-b border-gray-100">
+          <div className="flex border-b border-gray-100 bg-white">
             {(['mine', 'joined'] as const).map((tab) => (
               <button key={tab} onClick={() => setRegTab(tab)}
-                className={`flex-1 py-2.5 text-xs font-semibold text-center cursor-pointer transition-colors ${regTab === tab ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-600'}`}>
+                className={`flex-1 py-3 text-xs font-semibold text-center cursor-pointer transition-colors relative ${
+                  regTab === tab ? 'text-primary' : 'text-gray-400 hover:text-gray-600'
+                }`}>
                 {tab === 'mine' ? '我发布的' : '我报名的'}
+                {regTab === tab && <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full" />}
               </button>
             ))}
           </div>
@@ -240,7 +279,7 @@ export default function ProfileTab({
       <div className="p-4 space-y-3">
         {contentData.map((item) =>
           activeContentTab === 'saved' ? (
-            <ThumbListItem key={item.id} item={item} onClick={() => onOpenDetail(item)}
+            <ContentCard key={item.id} item={item} onClick={() => onOpenDetail(item)}
               rightSlot={
                 <button onClick={(e) => {
                   e.stopPropagation();
@@ -252,9 +291,9 @@ export default function ProfileTab({
               <div className="flex items-center gap-2 text-[10px] text-gray-400">
                 <span>{item.publisherName}</span><span>·</span><span>{item.publishedTimeText}</span>
               </div>
-            </ThumbListItem>
+            </ContentCard>
           ) : (
-            <ThumbListItem key={item.id} item={item} onClick={() => onOpenDetail(item)}>
+            <ContentCard key={item.id} item={item} onClick={() => onOpenDetail(item)}>
               <div className="flex items-center gap-2">
                 <StatusBadge status={item.status} />
                 <span className="text-[10px] text-gray-400">{item.publishedTimeText}</span>
@@ -267,7 +306,7 @@ export default function ProfileTab({
                 <button onClick={(e) => { e.stopPropagation(); onStartEdit(item); }}
                   className="mt-2 text-[10px] font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer">编辑重发</button>
               )}
-            </ThumbListItem>
+            </ContentCard>
           )
         )}
       </div>
@@ -276,124 +315,213 @@ export default function ProfileTab({
 
   // ── 渲染 ──
   return (
-    <div className="flex flex-col flex-1 animate-fade-in">
-      {/* 个人信息头部 — 社交主页风格 */}
-      <section className="px-4 pt-6 pb-4 bg-white border-b border-gray-100">
-        <div className="flex items-center gap-4">
+    <div className="flex flex-col flex-1 animate-fade-in bg-slate-50">
+      {/* ━━━ 封面区 ━━━ */}
+      <section className="relative">
+        {/* 封面渐变背景 */}
+        <div className={`h-36 bg-gradient-to-br ${coverGradient} relative overflow-hidden`}>
+          {/* 装饰圆点 */}
+          <div className="absolute top-3 right-6 w-20 h-20 rounded-full bg-white/10" />
+          <div className="absolute -bottom-4 -left-4 w-24 h-24 rounded-full bg-white/5" />
+          <div className="absolute top-10 right-12 w-10 h-10 rounded-full bg-white/8" />
+
+          {/* 问候语 */}
+          <div className="absolute top-4 left-5">
+            <p className="text-white/80 text-[10px] font-medium">{greeting}</p>
+          </div>
+
+          {/* 头像上传入口（覆盖在封面上） */}
+          {profile.studentId && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute top-3 right-4 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-all cursor-pointer"
+              aria-label="更换封面"
+            >
+              <Icon name="camera" className="text-white text-sm" />
+            </button>
+          )}
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+        </div>
+
+        {/* 头像 — 居中覆盖封面底部 */}
+        <div className="flex justify-center -mt-12 relative z-10">
           <div
             onClick={() => profile.studentId && fileInputRef.current?.click()}
-            className={`relative w-20 h-20 rounded-full overflow-hidden border-2 shrink-0 bg-slate-100 ${profile.isVerified ? 'border-primary/30' : 'border-slate-200'} ${profile.studentId ? 'cursor-pointer' : ''}`}
+            className={`relative w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg shrink-0 bg-slate-100 ${
+              profile.isVerified ? 'border-primary/20' : 'border-white'
+            } ${profile.studentId ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
           >
-            <img src={profile.avatarUrl || ''} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            {!profile.avatarUrl && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-300">
-                <Icon name="person" className="text-3xl" />
+            {profile.avatarUrl ? (
+              <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-gray-300 bg-gradient-to-br from-slate-100 to-slate-200">
+                <Icon name="person" className="text-4xl" />
               </div>
             )}
+            {/* 头像编辑角标 */}
             {profile.studentId && (
-              <div className="absolute bottom-0 right-0 w-6 h-6 bg-primary rounded-full flex items-center justify-center shadow-md">
+              <div className="absolute bottom-0 right-0 w-7 h-7 bg-primary rounded-full flex items-center justify-center shadow-md border-2 border-white">
                 <Icon name="camera" className="text-white text-[10px]" />
               </div>
             )}
+            {/* 上传中遮罩 */}
             {avatarUploading && (
               <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               </div>
             )}
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] text-primary font-semibold mb-0.5">{greeting}</p>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <h1 className="font-headline text-lg font-bold truncate">{profile.fullName}</h1>
-              {profile.isVerified && (
-                <span className="inline-flex items-center gap-0.5 bg-course-green/10 text-course-green px-1.5 py-0.5 rounded-full shrink-0">
-                  <Icon name="verified" className="text-[9px]" /><span className="text-[9px] font-bold">已认证</span>
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400 flex-wrap">
-              {profile.studentId && <span>学号 {profile.studentId}</span>}
-              <span className="text-gray-300">|</span>
-              <span>{profile.department}</span>
-              {profile.orgLevel && (
-                <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[9px] font-semibold">{profile.orgLevel}{profile.position}</span>
-              )}
-            </div>
-            {editingBio ? (
-              <div className="flex items-center gap-1.5 mt-2">
-                <input
-                  autoFocus
-                  value={bioDraft}
-                  onChange={(e) => setBioDraft(e.target.value)}
-                  maxLength={80}
-                  placeholder="写一句个性签名..."
-                  className="flex-1 text-xs bg-slate-50 border border-gray-200 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none"
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleBioSave(); if (e.key === 'Escape') setEditingBio(false); }}
-                />
-                <button onClick={handleBioSave} className="text-[10px] font-semibold text-primary bg-primary/5 px-2.5 py-1.5 rounded-lg hover:bg-primary/10 cursor-pointer">保存</button>
-                <button onClick={() => setEditingBio(false)} className="text-[10px] text-gray-400 px-2 py-1.5 cursor-pointer">取消</button>
-              </div>
-            ) : (
-              <p
-                onClick={() => profile.studentId && setEditingBio(true)}
-                className={`flex items-center gap-1 mt-1.5 text-xs ${profile.bio ? 'text-gray-500 hover:text-primary' : 'text-primary/60 hover:text-primary'} ${profile.studentId ? 'cursor-pointer' : ''}`}
-              >
-                {profile.bio ? (
-                  profile.bio
-                ) : (
-                  <>
-                    <Icon name="edit_document" className="text-[10px]" />
-                    <span>添加个性签名</span>
-                  </>
-                )}
-              </p>
-            )}
-            {!profile.isVerified && (
-              <Button variant="primary" size="sm" onClick={onAuthClick}>本校学生身份核验</Button>
-            )}
-          </div>
-        </div>
-
-        {/* 数据统计 */}
-        <div className="flex gap-6 mt-5 pt-4 border-t border-gray-50">
-          <StatItem count={myPostCount} label="发布" onClick={() => setActiveContentTab('posts')} active={activeContentTab === 'posts'} />
-          <StatItem count={savedCount} label="收藏" onClick={() => setActiveContentTab('saved')} active={activeContentTab === 'saved'} />
-          <StatItem count={regCount} label="报名" onClick={() => setActiveContentTab('regs')} active={activeContentTab === 'regs'} />
         </div>
       </section>
 
-      {/* 内容区 */}
-      <div className="flex-1 flex flex-col">
-        {activeContentTab !== 'posts' && (
-          <div className="flex items-center gap-1 px-4 py-1.5 bg-slate-50 border-b border-gray-100 text-[10px] text-gray-400">
-            <Icon name="lock" className="text-[9px]" />
-            仅自己可见
+      {/* ━━━ 个人信息区 ━━━ */}
+      <section className="px-5 pt-3 pb-1 text-center">
+        {/* 姓名 + 认证 */}
+        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+          <h1 className="font-headline text-lg font-bold text-on-surface">{profile.fullName}</h1>
+          {profile.isVerified && (
+            <span className="inline-flex items-center gap-0.5 bg-course-green/10 text-course-green px-1.5 py-0.5 rounded-full shrink-0">
+              <Icon name="verified" className="text-[9px]" /><span className="text-[9px] font-bold">已认证</span>
+            </span>
+          )}
+        </div>
+
+        {/* 学校/部门/身份 */}
+        <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] text-gray-400 flex-wrap">
+          {profile.studentId && <span>学号 {profile.studentId}</span>}
+          {profile.studentId && <span className="text-gray-300">·</span>}
+          <span>{profile.department}</span>
+          {profile.orgLevel && (
+            <>
+              <span className="text-gray-300">·</span>
+              <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[9px] font-semibold">{profile.orgLevel}{profile.position}</span>
+            </>
+          )}
+        </div>
+
+        {/* 个性签名 */}
+        <div className="mt-3 mb-1">
+          {editingBio ? (
+            <div className="flex items-center gap-1.5 max-w-xs mx-auto">
+              <input
+                autoFocus
+                value={bioDraft}
+                onChange={(e) => setBioDraft(e.target.value)}
+                maxLength={80}
+                placeholder="写一句个性签名..."
+                className="flex-1 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none text-center"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleBioSave(); if (e.key === 'Escape') setEditingBio(false); }}
+              />
+              <button onClick={handleBioSave} className="text-[10px] font-semibold text-primary bg-primary/5 px-2.5 py-2 rounded-lg hover:bg-primary/10 cursor-pointer shrink-0">保存</button>
+              <button onClick={() => setEditingBio(false)} className="text-[10px] text-gray-400 px-2 py-2 cursor-pointer shrink-0">取消</button>
+            </div>
+          ) : (
+            <p
+              onClick={() => profile.studentId && setEditingBio(true)}
+              className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full transition-colors ${
+                profile.bio
+                  ? 'text-gray-500 bg-slate-100 hover:bg-slate-200'
+                  : 'text-primary/60 hover:text-primary bg-primary/5 hover:bg-primary/10'
+              } ${profile.studentId ? 'cursor-pointer' : ''}`}
+            >
+              {profile.bio ? (
+                profile.bio
+              ) : (
+                <>
+                  <Icon name="edit_document" className="text-[10px]" />
+                  <span>添加个性签名</span>
+                </>
+              )}
+            </p>
+          )}
+        </div>
+
+        {/* 未认证提示 */}
+        {!profile.isVerified && (
+          <div className="mt-3">
+            <Button variant="primary" size="sm" onClick={onAuthClick}>本校学生身份核验</Button>
           </div>
         )}
-        {renderContent()}
-      </div>
+      </section>
 
-      {/* 底部菜单 */}
-      <div className="border-t border-gray-100 bg-white px-4 py-2 flex flex-col gap-1">
-        {MENU_ITEMS.map((row) => (
-          <button key={row.id}
-            onClick={() => row.id === 'feedback' ? setIsFeedbackOpen(true) : setShowAbout(true)}
-            className="flex items-center gap-3 py-2.5 text-left hover:bg-slate-50 rounded-lg px-2 transition-colors cursor-pointer">
-            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-gray-500 shrink-0">
-              <Icon name={row.icon} className="text-sm" />
+      {/* ━━━ 数据统计 ━━━ */}
+      <section className="px-4 pt-4 pb-2">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-2 py-3 flex justify-center gap-1">
+          <StatItem count={myPostCount} label="发布" icon="post_add" onClick={() => setActiveContentTab('posts')} active={activeContentTab === 'posts'} />
+          <div className="w-px bg-gray-100 self-center h-8" />
+          <StatItem count={savedCount} label="收藏" icon="bookmark" onClick={() => setActiveContentTab('saved')} active={activeContentTab === 'saved'} />
+          <div className="w-px bg-gray-100 self-center h-8" />
+          <StatItem count={regCount} label="报名" icon="celebration" onClick={() => setActiveContentTab('regs')} active={activeContentTab === 'regs'} />
+        </div>
+      </section>
+
+      {/* ━━━ 内容标签切换 ━━━ */}
+      <section className="px-4 pt-1 pb-2">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* Tab bar */}
+          <div className="flex border-b border-gray-100">
+            {([
+              { key: 'posts', label: '我的发布' },
+              { key: 'saved', label: '我的收藏' },
+              { key: 'regs', label: '活动报名' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveContentTab(tab.key)}
+                className={`flex-1 py-3 text-xs font-semibold text-center cursor-pointer transition-colors relative ${
+                  activeContentTab === tab.key ? 'text-primary' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                {tab.label}
+                {activeContentTab === tab.key && (
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full" />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* 隐私提示 */}
+          {activeContentTab !== 'posts' && (
+            <div className="flex items-center justify-center gap-1 px-4 py-2 bg-slate-50 text-[10px] text-gray-400">
+              <Icon name="lock" className="text-[9px]" />
+              仅自己可见
             </div>
-            <div className="flex-1 min-w-0">
-              <span className="text-xs font-semibold text-gray-700 block">{row.label}</span>
-              <span className="text-[10px] text-gray-400">{row.desc}</span>
-            </div>
-            <Icon name="chevron_right" className="text-gray-300 text-sm" />
-          </button>
-        ))}
+          )}
+
+          {/* 内容列表 */}
+          <div className="max-h-[50vh] overflow-y-auto">
+            {renderContent()}
+          </div>
+        </div>
+      </section>
+
+      {/* ━━━ 底部菜单 ━━━ */}
+      <section className="px-4 pt-1 pb-4">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          {MENU_ITEMS.map((row, idx) => (
+            <button key={row.id}
+              onClick={() => row.id === 'feedback' ? setIsFeedbackOpen(true) : setShowAbout(true)}
+              className={`w-full flex items-center gap-3 py-3 px-4 text-left hover:bg-slate-50 transition-colors cursor-pointer ${
+                idx > 0 ? 'border-t border-gray-50' : ''
+              }`}>
+              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-gray-500 shrink-0">
+                <Icon name={row.icon} className="text-sm" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-semibold text-gray-700 block">{row.label}</span>
+                <span className="text-[10px] text-gray-400">{row.desc}</span>
+              </div>
+              <Icon name="chevron_right" className="text-gray-300 text-sm" />
+            </button>
+          ))}
+        </div>
+
         {profile.studentId && (
-          <Button variant="danger" size="sm" block onClick={onLogout}>退出登录</Button>
+          <div className="mt-3">
+            <Button variant="danger" size="sm" block onClick={onLogout}>退出登录</Button>
+          </div>
         )}
-      </div>
+      </section>
 
       {/* 反馈弹窗 */}
       <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} onSuccess={onShowToast} />
@@ -414,15 +542,5 @@ export default function ProfileTab({
         </div>
       </Modal>
     </div>
-  );
-}
-
-// ── 统计项 ──
-function StatItem({ count, label, onClick, active }: { count: number; label: string; onClick: () => void; active: boolean }) {
-  return (
-    <button onClick={onClick} className={`flex flex-col items-center cursor-pointer transition-colors ${active ? 'text-primary' : 'text-gray-400 hover:text-gray-600'}`}>
-      <span className="font-headline text-lg font-bold">{count}</span>
-      <span className={`text-[10px] font-semibold mt-0.5 ${active ? 'border-b-2 border-primary pb-0.5' : ''}`}>{label}</span>
-    </button>
   );
 }

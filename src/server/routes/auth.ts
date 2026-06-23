@@ -13,7 +13,7 @@ import { auth } from '../middleware/auth';
 import { limiter } from '../middleware/limiter';
 import { logger } from '../../utils/logger';
 import { ErrorCode } from '../errors';
-import { ok, fail, validate } from '../response';
+import { ok, fail, notFound, validate } from '../response';
 import { loginSchema, setPasswordSchema } from '../validators';
 
 export function registerAuthRoutes(app: any, pool: Pool) {
@@ -65,8 +65,8 @@ export function registerAuthRoutes(app: any, pool: Pool) {
         const autoVerified = input.confidence === 'high' && !hasOrg;
         const initialStatus = autoVerified ? 'verified' : 'pending';
         const [result]: any = await pool.query(
-          "INSERT INTO users (student_id, nickname, auth_status, password_hash, department, org_level, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [input.studentId, input.fullName, initialStatus, hash, input.department || null, input.orgLevel || '', input.position || ''],
+          "INSERT INTO users (student_id, nickname, auth_status, password_hash, department, org_level, org_name, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [input.studentId, input.fullName, initialStatus, hash, input.department || null, input.orgLevel || '', input.orgName || '', input.position || ''],
         );
         user = {
           id: result.insertId,
@@ -76,6 +76,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           is_admin: false,
           department: input.department || null,
           org_level: input.orgLevel || '',
+          org_name: input.orgName || '',
           position: input.position || '',
         };
         if (autoVerified) {
@@ -86,10 +87,10 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       }
 
       // 老用户登录时同步更新组织信息
-      if (!isNew && (input.department || input.orgLevel || input.position)) {
+      if (!isNew && (input.department || input.orgLevel || input.orgName || input.position)) {
         await pool.query(
-          'UPDATE users SET department = COALESCE(?, department), org_level = COALESCE(NULLIF(?, \'\'), org_level), position = COALESCE(NULLIF(?, \'\'), position) WHERE id = ?',
-          [input.department || null, input.orgLevel || '', input.position || '', user.id],
+          'UPDATE users SET department = COALESCE(?, department), org_level = COALESCE(NULLIF(?, \'\'), org_level), org_name = COALESCE(NULLIF(?, \'\'), org_name), position = COALESCE(NULLIF(?, \'\'), position) WHERE id = ?',
+          [input.department || null, input.orgLevel || '', input.orgName || '', input.position || '', user.id],
         ).catch(() => {});
       }
 
@@ -123,7 +124,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           is_admin: isAdmin,
           trace_id: req._traceId,
         });
-        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', position: user.position || '' } });
+        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', orgName: user.org_name || '', position: user.position || '' } });
       } catch (err: any) {
         await conn.rollback();
         logger.error('认证事务失败', { error: err.message, user_id: user.id, trace_id: req._traceId });
@@ -274,6 +275,44 @@ export function registerAuthRoutes(app: any, pool: Pool) {
     } catch (err: any) {
       logger.error('资料更新失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '更新失败');
+    }
+  });
+
+  // ── 公开用户主页信息 ──
+  app.get('/api/v1/users/:id/public-profile', async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id as string);
+      if (!userId || userId < 1) return fail(res, 400, '无效的用户ID');
+
+      const [users]: any = await pool.query(
+        'SELECT id, nickname, avatar_url, bio, department, org_level, org_name, position, auth_status, created_at FROM users WHERE id = ?',
+        [userId],
+      );
+      if (users.length === 0) return notFound(res, '用户不存在');
+      const u = users[0];
+
+      // 统计该用户近30天发布的帖子数
+      const [postCount]: any = await pool.query(
+        "SELECT COUNT(*) AS cnt FROM posts WHERE user_id = ? AND status = 'active' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+        [userId],
+      );
+
+      ok(res, {
+        id: u.id,
+        nickname: u.nickname,
+        avatarUrl: u.avatar_url || '',
+        bio: u.bio || '',
+        department: u.department || '',
+        orgLevel: u.org_level || '',
+        orgName: u.org_name || '',
+        position: u.position || '',
+        isVerified: u.auth_status === 'verified',
+        activePosts: postCount[0]?.cnt || 0,
+        joinedAt: u.created_at?.toISOString().substring(0, 10) || '',
+      });
+    } catch (err: any) {
+      logger.error('获取用户信息失败', { error: err.message, trace_id: req._traceId });
+      fail(res, 500, '获取用户信息失败');
     }
   });
 }

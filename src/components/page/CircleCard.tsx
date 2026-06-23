@@ -64,9 +64,9 @@ function CircleCardInner({ post, onLike, onSave, onDetail, isSaved }: CircleCard
 
       {/* 图片 */}
       {images.length > 0 && (
-        <div className={`grid gap-1.5 mb-3 ${images.length === 1 ? 'grid-cols-1' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        <div className="flex gap-1.5 mb-3 overflow-x-auto hide-scrollbar">
           {images.slice(0, 3).map((url, i) => (
-            <div key={i} className="aspect-square rounded-lg overflow-hidden bg-slate-100">
+            <div key={i} className="w-14 h-14 rounded-lg overflow-hidden bg-slate-100 shrink-0">
               <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
             </div>
           ))}
