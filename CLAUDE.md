@@ -91,3 +91,29 @@ Hooks 模式（无 Redux）：useAppData / useAppActions / useCircles / useOptim
 | feedback | /feedback | POST | — | 5 |
 | health | /health | GET | — | — |
 | admin | /admin/* | 全部 | adminAuth | 各不同 |
+| notices | /notices | GET/PUT | auth | — |
+
+## 迭代日志
+
+### R1 发布+消息（2026-06）
+- 图片本地上传 FormData / 发布草稿 2s debounce localStorage 恢复
+- 消息真实推送：审核/报名写入 notices 表，前端 syncMessages 替换 Mock
+
+### R2 刷新+收藏（2026-06）
+- 下拉刷新 60px 阈值 touch 手势 / 首页分页触底 200px 预加载 / CardSkeleton 骨架屏
+- 收藏列表取消收藏 / Tab 全部 display:none 保活不丢状态
+
+### R3 课表+编辑+互动（2026-06）
+- 课程冲突四维检测/编辑入口 badge 始终可见/回到顶部 FAB scroll>500px/广告关闭 24h localStorage/浏览收藏数展示
+
+### R4 搜索+导出（2026-06）
+- 圈子服务端搜索 SQL LIKE keyword / 课表文字导出按天分组→剪贴板
+
+### R5 离线+搜索+骨架屏（2026-06）
+- Modal ESC 关闭+body 锁定 / OfflineBanner 离线横幅 / SearchPage 服务端搜索 300ms 防抖 / CircleTab 初始骨架屏
+
+### 修复部署（2026-06）
+- 默认图→空数组 / 无图隐藏 aspect-square / 审核→发帖即上线 / 广告移动端始终可见 / deploy.sh chunk 归类 / notices 1054 降级 / 违禁词前端拦截 / Canvas 内存泄漏
+
+### R6 UI打磨（2026-06）
+- PostCard 有图帖子 60px 左缩略图 flex 布局 / ListingDetail 轮播手势滑动 50px 阈值跟手回弹
