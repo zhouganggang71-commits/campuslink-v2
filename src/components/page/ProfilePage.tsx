@@ -111,20 +111,15 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
 
   return (
     <div className="flex flex-col animate-fade-in bg-slate-50">
-      {/* ── 顶栏：返回按钮 ── */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-3">
+      {/* ── 封面（含返回按钮）── */}
+      <div className={`h-44 bg-gradient-to-br ${gradient} relative overflow-hidden flex-shrink-0`}>
         <button
           onClick={onBack}
-          className="w-8 h-8 rounded-full bg-black/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/30 transition-colors"
+          className="absolute top-3 left-3 z-20 w-8 h-8 rounded-full bg-black/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/30 transition-colors"
         >
           <Icon name="arrow_back" className="text-sm" />
         </button>
-        <span className="text-white text-xs font-semibold drop-shadow-sm">个人主页</span>
-        <div className="w-8" />
-      </div>
-
-      {/* ── 封面 ── */}
-      <div className={`h-44 bg-gradient-to-br ${gradient} relative overflow-hidden flex-shrink-0`}>
+        <span className="absolute top-3 left-1/2 -translate-x-1/2 z-10 text-white text-xs font-semibold drop-shadow-sm">个人主页</span>
         {/* 装饰 */}
         <div className="absolute top-6 right-10 w-24 h-24 rounded-full bg-white/10" />
         <div className="absolute -bottom-6 -left-8 w-32 h-32 rounded-full bg-white/5" />
