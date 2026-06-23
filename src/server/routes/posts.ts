@@ -38,9 +38,16 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const postType = req.query.type as string;
       const sort = (req.query.sort as string) || 'default';
       const keyword = (req.query.keyword as string) || '';
+      const userId = parseInt(req.query.userId as string) || 0;
 
-      let where = "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+      // 查看特定用户帖子时不过滤状态和时间
+      let where = userId > 0
+        ? 'WHERE p.user_id = ?'
+        : "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
       const params: any[] = [];
+      if (userId > 0) {
+        params.push(userId);
+      }
       if (postType && postType !== 'all') {
         where += ' AND p.post_type = ?';
         params.push(postType);

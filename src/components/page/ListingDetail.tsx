@@ -1,9 +1,9 @@
 import { useState, lazy, Suspense, useRef, useCallback } from 'react';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
-import UserProfileModal from '../modal/UserProfileModal';
 
 const RegisterPanel = lazy(() => import('./RegisterPanel'));
+const ProfilePage = lazy(() => import('./ProfilePage'));
 
 const REPORT_REASONS = ['虚假信息', '诈骗钓鱼', '色情低俗', '违禁品', '人身攻击', '其他违规'];
 
@@ -39,7 +39,7 @@ export default function ListingDetail({
   const isSaved = savedListingIds.includes(listing.id);
   const isReal = /^\d+$/.test(listing.id); // 真实帖子 ID 为纯数字，mock 数据 ID 如 headphones-1 非数字
   const [isReportOpen, setIsReportOpen] = useState(false);
-  const [showPublisherProfile, setShowPublisherProfile] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const isOwn = listing.publisherName === currentUserName;
 
   // ── 手势滑动 ──
@@ -71,6 +71,27 @@ export default function ListingDetail({
     }
     setSwipeDelta(0);
   }, [swipeDelta, carouselIndex, setCarouselIndex, listing.imageUrls.length]);
+
+  // 跳转个人主页
+  if (showProfile) {
+    return (
+      <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
+        <ProfilePage
+          userId={listing.publisherId}
+          onBack={() => setShowProfile(false)}
+          placeholder={{
+            name: listing.publisherName,
+            avatar: listing.publisherAvatar,
+            isVerified: listing.isVerifiedStudent,
+            department: listing.department,
+            orgLevel: listing.publisherOrgLevel,
+            orgName: listing.orgName,
+            position: listing.publisherPosition,
+          }}
+        />
+      </Suspense>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
@@ -207,7 +228,11 @@ export default function ListingDetail({
 
       <section className="p-4 bg-white flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 active:scale-[0.98] transition-all" onClick={() => setShowPublisherProfile(true)}>
+          <button
+            type="button"
+            onClick={() => setShowProfile(true)}
+            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:bg-slate-50 active:bg-slate-100 rounded-xl p-1 -m-1 transition-colors text-left"
+          >
             <img
               src={listing.publisherAvatar}
               alt={listing.publisherName}
@@ -227,7 +252,7 @@ export default function ListingDetail({
               <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
             </div>
             <Icon name="chevron_right" className="text-gray-300 text-sm shrink-0" />
-          </div>
+          </button>
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
           <div className="flex gap-2">
@@ -305,22 +330,6 @@ export default function ListingDetail({
           </div>
         )}
       </div>
-
-      {/* 发帖人主页弹窗 */}
-      <UserProfileModal
-        isOpen={showPublisherProfile}
-        onClose={() => setShowPublisherProfile(false)}
-        userId={listing.publisherId}
-        placeholder={{
-          name: listing.publisherName,
-          avatar: listing.publisherAvatar,
-          isVerified: listing.isVerifiedStudent,
-          department: listing.department,
-          orgLevel: listing.publisherOrgLevel,
-          orgName: listing.orgName,
-          position: listing.publisherPosition,
-        }}
-      />
     </div>
   );
 }
