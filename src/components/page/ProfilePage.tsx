@@ -47,6 +47,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
   const [posts, setPosts] = useState<Listing[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
+  const [avatarError, setAvatarError] = useState(false);
 
   const gradient = COVER_GRADIENTS[Math.abs(userId || 1) % COVER_GRADIENTS.length];
 
@@ -136,8 +137,14 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
         <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-xl bg-slate-100 ${
           displayVerified ? 'border-primary/20' : 'border-white'
         }`}>
-          {displayAvatar ? (
-            <img src={displayAvatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          {displayAvatar && !avatarError ? (
+            <img
+              src={displayAvatar}
+              alt=""
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => setAvatarError(true)}
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-300 bg-gradient-to-br from-slate-100 to-slate-200">
               <Icon name="person" className="text-4xl" />
@@ -245,13 +252,21 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
                 {posts.map((post) => (
                   <div key={post.id} className="aspect-square bg-slate-100 rounded-lg overflow-hidden relative group">
                     {post.imageUrls.length > 0 ? (
-                      <img src={post.imageUrls[0]} alt={post.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 p-2">
-                        <Icon name="post_add" className="text-2xl mb-1" />
-                        <span className="text-[9px] text-center line-clamp-2 text-gray-400">{post.title}</span>
-                      </div>
-                    )}
+                      <img
+                        src={post.imageUrls[0]}
+                        alt={post.title}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                          (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                    ) : null}
+                    <div className={`w-full h-full flex flex-col items-center justify-center text-gray-300 p-2 ${post.imageUrls.length > 0 ? 'hidden' : ''}`}>
+                      <Icon name="post_add" className="text-2xl mb-1" />
+                      <span className="text-[9px] text-center line-clamp-2 text-gray-400">{post.title}</span>
+                    </div>
                     {/* 遮罩层 */}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end p-1.5">
                       <span className="text-white text-[9px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity line-clamp-2">{post.title}</span>

@@ -101,6 +101,7 @@ export interface StudentProfile {
   orgName: string;
   position: Position | '';
   avatarUrl: string;
+  coverUrl: string;
   bio: string;
   isVerified: boolean;
   isAdmin: boolean;

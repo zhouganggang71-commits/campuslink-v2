@@ -56,6 +56,7 @@ export function useAuthActions(d: AuthDataLayer) {
         isVerified: verified,
         isAdmin: !!res.data?.user?.isAdmin,
         avatarUrl: res.data?.user?.avatarUrl || '',
+        coverUrl: res.data?.user?.coverUrl || '',
         bio: res.data?.user?.bio || '',
         postsCount: 0,
         savedCount: 0,

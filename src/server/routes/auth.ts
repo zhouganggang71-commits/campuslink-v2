@@ -124,7 +124,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           is_admin: isAdmin,
           trace_id: req._traceId,
         });
-        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', orgName: user.org_name || '', position: user.position || '' } });
+        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', coverUrl: user.cover_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', orgName: user.org_name || '', position: user.position || '' } });
       } catch (err: any) {
         await conn.rollback();
         logger.error('认证事务失败', { error: err.message, user_id: user.id, trace_id: req._traceId });
@@ -251,13 +251,46 @@ export function registerAuthRoutes(app: any, pool: Pool) {
   app.post('/api/v1/auth/avatar', auth, limiter(5), avatarUpload.single('avatar'), async (req: Request, res: Response) => {
     try {
       if (!req.file) return fail(res, 400, '请选择图片');
-      const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+      const avatarUrl = `/campus/uploads/avatars/${req.file.filename}`;
       await pool.query('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, req.userId]);
       logger.business('头像更新', { user_id: req.userId, trace_id: req._traceId });
       ok(res, { avatar_url: avatarUrl });
     } catch (err: any) {
       logger.error('头像上传失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '头像上传失败');
+    }
+  });
+
+  // ── 封面上传 ──
+  const coverUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => {
+        const dir = path.join(process.cwd(), 'uploads', 'covers');
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
+      filename: (req: any, _file, cb) => {
+        const uid = req.userId || 'unknown';
+        cb(null, `cover-${uid}-${Date.now()}${path.extname(_file.originalname) || '.jpg'}`);
+      },
+    }),
+    limits: { fileSize: 4 * 1024 * 1024 }, // 封面允许 4MB
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) cb(null, true);
+      else cb(new Error('仅支持图片格式'));
+    },
+  });
+
+  app.post('/api/v1/auth/cover', auth, limiter(5), coverUpload.single('cover'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) return fail(res, 400, '请选择图片');
+      const coverUrl = `/campus/uploads/covers/${req.file.filename}`;
+      await pool.query('UPDATE users SET cover_url = ? WHERE id = ?', [coverUrl, req.userId]);
+      logger.business('封面更新', { user_id: req.userId, trace_id: req._traceId });
+      ok(res, { cover_url: coverUrl });
+    } catch (err: any) {
+      logger.error('封面上传失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
+      fail(res, 500, '封面上传失败');
     }
   });
 
@@ -285,7 +318,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       if (!userId || userId < 1) return fail(res, 400, '无效的用户ID');
 
       const [users]: any = await pool.query(
-        'SELECT id, nickname, avatar_url, bio, department, org_level, org_name, position, auth_status, created_at FROM users WHERE id = ?',
+        'SELECT id, nickname, avatar_url, cover_url, bio, department, org_level, org_name, position, auth_status, created_at FROM users WHERE id = ?',
         [userId],
       );
       if (users.length === 0) return notFound(res, '用户不存在');
@@ -301,6 +334,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
         id: u.id,
         nickname: u.nickname,
         avatarUrl: u.avatar_url || '',
+        coverUrl: u.cover_url || '',
         bio: u.bio || '',
         department: u.department || '',
         orgLevel: u.org_level || '',

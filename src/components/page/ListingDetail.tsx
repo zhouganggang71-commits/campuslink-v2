@@ -237,8 +237,11 @@ export default function ListingDetail({
             <img
               src={listing.publisherAvatar}
               alt={listing.publisherName}
-              className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm shrink-0"
+              className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm shrink-0 bg-slate-100"
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">

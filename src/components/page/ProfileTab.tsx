@@ -161,7 +161,11 @@ export default function ProfileTab({
 
   const [activeContentTab, setActiveContentTab] = useState<'posts' | 'saved' | 'regs'>('posts');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
+  const [coverError, setCoverError] = useState(false);
   const [editingBio, setEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState(profile.bio || '');
 
@@ -171,6 +175,7 @@ export default function ProfileTab({
     if (!file.type.startsWith('image/')) { onShowToast('请选择图片文件'); return; }
     if (file.size > 2 * 1024 * 1024) { onShowToast('图片不能超过2MB'); return; }
     setAvatarUploading(true);
+    setAvatarError(false);
     try {
       const form = new FormData();
       form.append('avatar', file);
@@ -184,6 +189,28 @@ export default function ProfileTab({
     } catch { onShowToast('上传失败，请重试'); }
     setAvatarUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { onShowToast('请选择图片文件'); return; }
+    if (file.size > 4 * 1024 * 1024) { onShowToast('封面不能超过4MB'); return; }
+    setCoverUploading(true);
+    setCoverError(false);
+    try {
+      const form = new FormData();
+      form.append('cover', file);
+      const res = await api.upload<{ cover_url: string }>('/auth/cover', form);
+      if (res.code === 0 && res.data?.cover_url) {
+        onUpdateProfile((prev) => ({ ...prev, coverUrl: res.data!.cover_url }));
+        onShowToast('封面已更新');
+      } else {
+        onShowToast(res.message || '上传失败');
+      }
+    } catch { onShowToast('上传失败，请重试'); }
+    setCoverUploading(false);
+    if (coverInputRef.current) coverInputRef.current.value = '';
   };
 
   const handleBioSave = async () => {
@@ -318,29 +345,48 @@ export default function ProfileTab({
     <div className="flex flex-col flex-1 animate-fade-in bg-slate-50">
       {/* ━━━ 封面区 ━━━ */}
       <section className="relative">
-        {/* 封面渐变背景 */}
-        <div className={`h-36 bg-gradient-to-br ${coverGradient} relative overflow-hidden`}>
-          {/* 装饰圆点 */}
-          <div className="absolute top-3 right-6 w-20 h-20 rounded-full bg-white/10" />
-          <div className="absolute -bottom-4 -left-4 w-24 h-24 rounded-full bg-white/5" />
-          <div className="absolute top-10 right-12 w-10 h-10 rounded-full bg-white/8" />
+        {/* 封面背景 — 优先显示上传的封面图，否则渐变 */}
+        <div className={`h-36 relative overflow-hidden ${profile.coverUrl && !coverError ? '' : `bg-gradient-to-br ${coverGradient}`}`}>
+          {profile.coverUrl && !coverError ? (
+            <img
+              src={profile.coverUrl}
+              alt=""
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => setCoverError(true)}
+            />
+          ) : (
+            <>
+              {/* 装饰圆点 */}
+              <div className="absolute top-3 right-6 w-20 h-20 rounded-full bg-white/10" />
+              <div className="absolute -bottom-4 -left-4 w-24 h-24 rounded-full bg-white/5" />
+              <div className="absolute top-10 right-12 w-10 h-10 rounded-full bg-white/8" />
+            </>
+          )}
 
           {/* 问候语 */}
           <div className="absolute top-4 left-5">
-            <p className="text-white/80 text-[10px] font-medium">{greeting}</p>
+            <p className="text-white/80 text-[10px] font-medium drop-shadow-sm">{greeting}</p>
           </div>
 
-          {/* 头像上传入口（覆盖在封面上） */}
+          {/* 封面编辑按钮 */}
           {profile.studentId && (
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => coverInputRef.current?.click()}
               className="absolute top-3 right-4 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-all cursor-pointer"
               aria-label="更换封面"
             >
               <Icon name="camera" className="text-white text-sm" />
             </button>
           )}
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+          <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
+
+          {/* 封面上传中遮罩 */}
+          {coverUploading && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            </div>
+          )}
         </div>
 
         {/* 头像 — 居中覆盖封面底部 */}
@@ -351,8 +397,14 @@ export default function ProfileTab({
               profile.isVerified ? 'border-primary/20' : 'border-white'
             } ${profile.studentId ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
           >
-            {profile.avatarUrl ? (
-              <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            {profile.avatarUrl && !avatarError ? (
+              <img
+                src={profile.avatarUrl}
+                alt=""
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={() => setAvatarError(true)}
+              />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300 bg-gradient-to-br from-slate-100 to-slate-200">
                 <Icon name="person" className="text-4xl" />
@@ -371,6 +423,7 @@ export default function ProfileTab({
               </div>
             )}
           </div>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
         </div>
       </section>
 

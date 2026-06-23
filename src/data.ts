@@ -8,6 +8,7 @@ export const INITIAL_PROFILE: StudentProfile = {
   orgName: '',
   position: '',
   avatarUrl: '',
+  coverUrl: '',
   bio: '',
   isVerified: false,
   isAdmin: false,
