@@ -245,34 +245,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
             ) : (
               <div className="grid grid-cols-3 gap-1.5">
                 {posts.map((post) => (
-                  <div key={post.id} className="aspect-square bg-slate-100 rounded-lg overflow-hidden relative group">
-                    {post.imageUrls.length > 0 ? (
-                      <img
-                        src={post.imageUrls[0]}
-                        alt={post.title}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                          (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                    ) : null}
-                    <div className={`w-full h-full flex flex-col items-center justify-center text-gray-300 p-2 ${post.imageUrls.length > 0 ? 'hidden' : ''}`}>
-                      <Icon name="post_add" className="text-2xl mb-1" />
-                      <span className="text-[9px] text-center line-clamp-2 text-gray-400">{post.title}</span>
-                    </div>
-                    {/* 遮罩层 */}
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end p-1.5">
-                      <span className="text-white text-[9px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity line-clamp-2">{post.title}</span>
-                    </div>
-                    {/* 状态标签 */}
-                    {post.status !== 'active' && (
-                      <span className="absolute top-1 right-1 bg-black/50 text-white text-[8px] px-1 rounded">
-                        {post.status === 'sold' ? '已售' : post.status === 'closed' ? '已关闭' : post.status}
-                      </span>
-                    )}
-                  </div>
+                  <PostGridItem key={post.id} post={post} />
                 ))}
               </div>
             )}
@@ -287,6 +260,41 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function PostGridItem({ post }: { post: Listing }) {
+  const [imgError, setImgError] = useState(false);
+  const thumbUrl = post.imageUrls?.[0] || '';
+  const showImg = thumbUrl && !imgError;
+
+  return (
+    <div className="aspect-square bg-slate-100 rounded-lg overflow-hidden relative group">
+      {showImg ? (
+        <img
+          src={thumbUrl}
+          alt={post.title}
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 p-2">
+          <Icon name="post_add" className="text-2xl mb-1" />
+          <span className="text-[9px] text-center line-clamp-2 text-gray-400">{post.title}</span>
+        </div>
+      )}
+      {/* 遮罩层 */}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end p-1.5">
+        <span className="text-white text-[9px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity line-clamp-2">{post.title}</span>
+      </div>
+      {/* 状态标签 */}
+      {post.status !== 'active' && (
+        <span className="absolute top-1 right-1 bg-black/50 text-white text-[8px] px-1 rounded">
+          {post.status === 'sold' ? '已售' : post.status === 'closed' ? '已关闭' : post.status}
+        </span>
+      )}
     </div>
   );
 }
