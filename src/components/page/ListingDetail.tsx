@@ -209,9 +209,8 @@ export default function ListingDetail({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => listing.publisherId > 0 && setShowPublisherProfile(true)}
-              disabled={listing.publisherId <= 0}
-              className={`flex items-center gap-3 text-left ${listing.publisherId > 0 ? 'cursor-pointer hover:opacity-80 active:scale-95 transition-all' : 'cursor-default'}`}
+              onClick={() => setShowPublisherProfile(true)}
+              className="flex items-center gap-3 text-left cursor-pointer hover:opacity-80 active:scale-95 transition-all"
             >
               <img
                 src={listing.publisherAvatar}

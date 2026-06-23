@@ -39,7 +39,14 @@ export default function UserProfileModal({ isOpen, onClose, userId, placeholder 
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!isOpen || !userId) return;
+    if (!isOpen) return;
+    // 无真实 userId 时直接用 placeholder 展示，不请求 API
+    if (!userId) {
+      setProfile(null);
+      setLoading(false);
+      setError('');
+      return;
+    }
     setLoading(true);
     setError('');
     api.get<UserPublicProfile>(`/users/${userId}/public-profile`)
