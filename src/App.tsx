@@ -64,7 +64,7 @@ export default function App() {
         }}
       />
 
-      <main className="w-full max-w-md bg-white min-h-[calc(100vh-3.5rem)] shadow-sm flex flex-col relative pb-10 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <main className="w-full max-w-md bg-white h-[calc(100vh-3.5rem)] shadow-sm flex flex-col relative pb-10 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
         {d.selectedListing ? (
           <ListingDetail
