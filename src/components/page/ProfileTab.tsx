@@ -168,9 +168,10 @@ export default function ProfileTab({
   const [coverError, setCoverError] = useState(false);
   const [editingBio, setEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState(profile.bio || '');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // HEIC → JPEG 转换
-  const convertHeicToJpeg = (file: File): Promise<Blob> => new Promise((resolve, reject) => {
+  // 图片压缩/转换（Canvas → JPEG，max 1920px）
+  const compressImage = (file: File, quality = 0.85): Promise<Blob> => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
@@ -187,7 +188,7 @@ export default function ProfileTab({
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas 不可用')); return; }
         ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('转换失败')), 'image/jpeg', 0.85);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('转换失败')), 'image/jpeg', quality);
       };
       img.onerror = () => reject(new Error('图片加载失败'));
       img.src = reader.result as string;
@@ -199,18 +200,18 @@ export default function ProfileTab({
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     let file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { onShowToast('图片不能超过2MB'); return; }
     setAvatarUploading(true);
     setAvatarError(false);
     try {
-      // HEIC/HEIF 自动转 JPEG
+      // HEIC 自动转 JPEG，>2MB 自动压缩
       const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
-      if (isHeic) {
-        onShowToast('正在转换 HEIC 格式...', 'info');
+      const needCompress = isHeic || file.size > 2 * 1024 * 1024;
+      if (needCompress) {
+        onShowToast(isHeic ? '正在转换 HEIC 格式...' : '正在压缩图片...', 'info');
         try {
-          file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+          file = new File([await compressImage(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
         } catch {
-          onShowToast('HEIC 转换失败，请使用 JPG/PNG 格式', 'info');
+          onShowToast('图片处理失败，请使用 JPG/PNG 格式', 'info');
           setAvatarUploading(false);
           if (fileInputRef.current) fileInputRef.current.value = '';
           return;
@@ -233,18 +234,18 @@ export default function ProfileTab({
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     let file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) { onShowToast('封面不能超过4MB'); return; }
     setCoverUploading(true);
     setCoverError(false);
     try {
-      // HEIC/HEIF 自动转 JPEG
+      // HEIC 自动转 JPEG，>4MB 自动压缩
       const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
-      if (isHeic) {
-        onShowToast('正在转换 HEIC 格式...', 'info');
+      const needCompress = isHeic || file.size > 4 * 1024 * 1024;
+      if (needCompress) {
+        onShowToast(isHeic ? '正在转换 HEIC 格式...' : '正在压缩图片...', 'info');
         try {
-          file = new File([await convertHeicToJpeg(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+          file = new File([await compressImage(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
         } catch {
-          onShowToast('HEIC 转换失败，请使用 JPG/PNG 格式', 'info');
+          onShowToast('图片处理失败，请使用 JPG/PNG 格式', 'info');
           setCoverUploading(false);
           if (coverInputRef.current) coverInputRef.current.value = '';
           return;
@@ -443,10 +444,10 @@ export default function ProfileTab({
         {/* 头像 — 居中覆盖封面底部 */}
         <div className="flex justify-center -mt-12 relative z-10">
           <div
-            onClick={() => profile.studentId && fileInputRef.current?.click()}
+            onClick={() => profile.avatarUrl && !avatarError ? setPreviewImage(profile.avatarUrl) : profile.studentId && fileInputRef.current?.click()}
             className={`relative w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg shrink-0 bg-slate-100 ${
               profile.isVerified ? 'border-primary/20' : 'border-white'
-            } ${profile.studentId ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
+            } ${(profile.studentId || profile.avatarUrl) ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
           >
             {profile.avatarUrl && !avatarError ? (
               <img
@@ -463,7 +464,10 @@ export default function ProfileTab({
             )}
             {/* 头像编辑角标 */}
             {profile.studentId && (
-              <div className="absolute bottom-0 right-0 w-7 h-7 bg-primary rounded-full flex items-center justify-center shadow-md border-2 border-white">
+              <div
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                className="absolute bottom-0 right-0 w-7 h-7 bg-primary rounded-full flex items-center justify-center shadow-md border-2 border-white cursor-pointer hover:scale-110 transition-transform"
+              >
                 <Icon name="camera" className="text-white text-[10px]" />
               </div>
             )}
@@ -645,6 +649,16 @@ export default function ProfileTab({
           </div>
         </div>
       </Modal>
+
+      {/* 头像大图预览 */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={() => setPreviewImage(null)}>
+          <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white z-10">
+            <Icon name="close" className="text-xl" />
+          </button>
+          <img src={previewImage} alt="" className="max-w-full max-h-full object-contain p-4" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
