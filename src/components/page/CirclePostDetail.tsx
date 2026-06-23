@@ -88,13 +88,44 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
     setSubmitting(false);
   };
 
+  // 图片压缩（Canvas → JPEG，max 1920px）
+  const compressImage = (file: File): Promise<Blob> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX = 1920;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas 不可用')); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('转换失败')), 'image/jpeg', 0.8);
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
+
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    let file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) { showToast('请选择图片文件'); return; }
-    if (file.size > 5 * 1024 * 1024) { showToast('图片不能超过5MB'); return; }
     setImageUploading(true);
     try {
+      // HEIC 转 JPEG / >1MB 自动压缩
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic');
+      if (isHeic || file.size > 1 * 1024 * 1024) {
+        file = new File([await compressImage(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+      }
       const form = new FormData();
       form.append('file', file);
       const res = await api.upload<{ url: string }>('/upload', form);
