@@ -58,10 +58,13 @@ ssh "$N100" "
 echo "=== 5/6 部署 ==="
 ssh "$N100" "
   cd $DIR
-  # 首页资源移入 assets/，PWA 文件（sw.js/registerSW.js/workbox-*.js）保留在根目录
+  # 首页资源 + chunks 移入 assets/
   rm -rf assets
   mkdir assets
-  mv index-*.js index-*.css assets/ 2>/dev/null
+  mv *.js assets/ 2>/dev/null
+  mv *.css assets/ 2>/dev/null
+  # sw.js 必须保留在根目录（Service Worker scope）
+  mv assets/sw.js . 2>/dev/null
   pm2 restart campuslink
   sleep 2
 "

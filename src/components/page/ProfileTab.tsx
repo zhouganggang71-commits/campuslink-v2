@@ -343,7 +343,7 @@ export default function ProfileTab({
                   profile.bio
                 ) : (
                   <>
-                    <Icon name="edit" className="text-[10px]" />
+                    <Icon name="edit_document" className="text-[10px]" />
                     <span>添加个性签名</span>
                   </>
                 )}
