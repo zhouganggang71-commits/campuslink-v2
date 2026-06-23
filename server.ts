@@ -283,9 +283,22 @@ app.get("/disclaimer", (req, res) => {
 // ── SPA fallback ──
 app.get(/^(?!\/api\/|\/uploads\/).*/, (req, res) => {
   const filePath = path.join(distDir, req.path);
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return res.sendFile(filePath);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    // HTML 文件禁止缓存，确保浏览器每次拉取最新入口
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    return res.sendFile(filePath);
+  }
   const indexPath = path.join(distDir, "index.html");
-  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  if (fs.existsSync(indexPath)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    return res.sendFile(indexPath);
+  }
   fail(res, 404, "Not found");
 });
 
