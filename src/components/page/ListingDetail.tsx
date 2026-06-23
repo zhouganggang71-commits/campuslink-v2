@@ -207,30 +207,26 @@ export default function ListingDetail({
 
       <section className="p-4 bg-white flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowPublisherProfile(true)}
-              className="flex items-center gap-3 text-left cursor-pointer hover:opacity-80 active:scale-95 transition-all"
-            >
-              <img
-                src={listing.publisherAvatar}
-                alt={listing.publisherName}
-                className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm"
-                referrerPolicy="no-referrer"
-              />
-              <div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-headline font-semibold text-sm">{listing.publisherName}</span>
-                  {listing.isVerifiedStudent && (
-                    <span className="bg-course-green text-white text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                      <Icon name="verified" className="text-[10px]" />
-                      已认证
-                    </span>
-                  )}
-                </div>
-                <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
+          <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 active:scale-[0.98] transition-all" onClick={() => setShowPublisherProfile(true)}>
+            <img
+              src={listing.publisherAvatar}
+              alt={listing.publisherName}
+              className="w-10 h-10 rounded-full object-cover border border-slate-100 shadow-sm shrink-0"
+              referrerPolicy="no-referrer"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-headline font-semibold text-sm">{listing.publisherName}</span>
+                {listing.isVerifiedStudent && (
+                  <span className="bg-course-green text-white text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5 shrink-0">
+                    <Icon name="verified" className="text-[10px]" />
+                    已认证
+                  </span>
+                )}
               </div>
-            </button>
+              <span className="text-[11px] text-gray-400">{listing.publishedTimeText}</span>
+            </div>
+            <Icon name="chevron_right" className="text-gray-300 text-sm shrink-0" />
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
