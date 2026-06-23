@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, lazy, Suspense, useRef, useCallback } from 'react';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
 
@@ -40,12 +40,51 @@ export default function ListingDetail({
   const [isReportOpen, setIsReportOpen] = useState(false);
   const isOwn = listing.publisherName === currentUserName;
 
+  // ── 手势滑动 ──
+  const touchStartX = useRef(0);
+  const [swiping, setSwiping] = useState(false);
+  const [swipeDelta, setSwipeDelta] = useState(0);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    setSwiping(true);
+    setSwipeDelta(0);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!swiping) return;
+    const dx = e.touches[0].clientX - touchStartX.current;
+    setSwipeDelta(dx);
+  }, [swiping]);
+
+  const handleTouchEnd = useCallback(() => {
+    setSwiping(false);
+    const threshold = 50;
+    if (Math.abs(swipeDelta) > threshold) {
+      if (swipeDelta > 0 && carouselIndex > 0) {
+        setCarouselIndex(carouselIndex - 1);
+      } else if (swipeDelta < 0 && carouselIndex < listing.imageUrls.length - 1) {
+        setCarouselIndex(carouselIndex + 1);
+      }
+    }
+    setSwipeDelta(0);
+  }, [swipeDelta, carouselIndex, setCarouselIndex, listing.imageUrls.length]);
+
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
-      <section className="relative w-full aspect-square bg-gray-100 overflow-hidden">
+      <section
+        className="relative w-full aspect-square bg-gray-100 overflow-hidden"
+        onTouchStart={listing.imageUrls.length > 1 ? handleTouchStart : undefined}
+        onTouchMove={listing.imageUrls.length > 1 ? handleTouchMove : undefined}
+        onTouchEnd={listing.imageUrls.length > 1 ? handleTouchEnd : undefined}
+      >
         <div
           className="w-full h-full flex transition-transform duration-300"
-          style={{ transform: `translateX(-${carouselIndex * 100}%)` }}
+          style={{
+            transform: swiping
+              ? `translateX(calc(-${carouselIndex * 100}% + ${swipeDelta}px))`
+              : `translateX(-${carouselIndex * 100}%)`,
+          }}
         >
           {listing.imageUrls.length > 0 ? (
             listing.imageUrls.map((url, i) => (
