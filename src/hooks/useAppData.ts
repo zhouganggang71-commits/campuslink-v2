@@ -6,6 +6,8 @@ import { Listing, Course, Message, StudentProfile } from '../types';
 import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_NOTICES } from '../data';
 import { api, getToken } from '../utils/api';
 
+const CACHE_VERSION = 1; // 修改此值强制清除所有缓存
+
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(`campuslink_${key}`);
@@ -33,6 +35,17 @@ export function clearStorageCache() {
     /* noop */
   }
 }
+
+// 首次加载或版本升级时清除旧缓存
+(() => {
+  try {
+    const storedVersion = localStorage.getItem('campuslink_cache_version');
+    if (!storedVersion || parseInt(storedVersion) !== CACHE_VERSION) {
+      clearStorageCache();
+      localStorage.setItem('campuslink_cache_version', String(CACHE_VERSION));
+    }
+  } catch { /* noop */ }
+})();
 
 export function useAppData() {
   const [profile, setProfile] = useState<StudentProfile>(() => loadFromStorage('profile', INITIAL_PROFILE));

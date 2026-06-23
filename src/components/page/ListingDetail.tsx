@@ -75,7 +75,7 @@ export default function ListingDetail({
   // 跳转个人主页（overlay 方式避免卸载导致渲染异常）
   if (showProfile) {
     return (
-      <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col">
+      <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col overflow-y-auto overscroll-contain">
         <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
           <ProfilePage
             userId={listing.publisherId}
