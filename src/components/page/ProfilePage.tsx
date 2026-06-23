@@ -267,7 +267,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
 function PostGridItem({ post }: { post: Listing }) {
   const [imgError, setImgError] = useState(false);
   const thumbUrl = post.imageUrls?.[0] || '';
-  const showImg = thumbUrl && !imgError;
+  const showImg = !!(thumbUrl && thumbUrl.startsWith('http') && !imgError);
 
   return (
     <div className="aspect-square bg-slate-100 rounded-lg overflow-hidden relative group">
