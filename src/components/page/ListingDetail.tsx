@@ -1,4 +1,5 @@
 import { useState, lazy, Suspense, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
 
@@ -72,11 +73,11 @@ export default function ListingDetail({
     setSwipeDelta(0);
   }, [swipeDelta, carouselIndex, setCarouselIndex, listing.imageUrls.length]);
 
-  // 跳转个人主页（overlay 方式避免卸载导致渲染异常）
+  // 跳转个人主页（Portal 到 body，避免父容器 overflow/position 干扰滚动）
   if (showProfile) {
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col overflow-y-auto">
-        <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
+    return createPortal(
+      <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
+        <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" /></div>}>
           <ProfilePage
             userId={listing.publisherId}
             onBack={() => setShowProfile(false)}
@@ -91,7 +92,8 @@ export default function ListingDetail({
             }}
           />
         </Suspense>
-      </div>
+      </div>,
+      document.body,
     );
   }
 

@@ -28,7 +28,7 @@ export function clearStorageCache() {
   try {
     Object.keys(localStorage)
       .filter(
-        (k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid'].includes(k),
+        (k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_cache_version'].includes(k),
       )
       .forEach((k) => localStorage.removeItem(k));
   } catch {
