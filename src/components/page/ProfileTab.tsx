@@ -652,11 +652,13 @@ export default function ProfileTab({
 
       {/* 头像大图预览 */}
       {previewImage && (
-        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={() => setPreviewImage(null)}>
-          <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white z-10">
-            <Icon name="close" className="text-xl" />
+        <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col" onClick={() => setPreviewImage(null)}>
+          <button onClick={() => setPreviewImage(null)} className="absolute top-4 left-4 z-10 w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white">
+            <Icon name="arrow_back" className="text-lg" />
           </button>
-          <img src={previewImage} alt="" className="max-w-full max-h-full object-contain p-4" onClick={(e) => e.stopPropagation()} />
+          <div className="flex-1 flex items-center justify-center">
+            <img src={previewImage} alt="" className="max-w-full max-h-full object-contain" onClick={(e) => e.stopPropagation()} />
+          </div>
         </div>
       )}
     </div>
