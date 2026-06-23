@@ -1,8 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
 import { api, getToken } from '../../utils/api';
 import type { CirclePost } from '../../hooks/useCircles';
+
+const ProfilePage = lazy(() => import('./ProfilePage'));
 
 interface CommentItem {
   id: number;
@@ -41,6 +43,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localLikeCount, setLocalLikeCount] = useState(post.like_count);
+  const [showProfile, setShowProfile] = useState(false);
 
   const displayName = post.is_anonymous ? '匿名同学' : post.nickname;
   const images = Array.isArray(post.images) ? post.images : [];
@@ -97,7 +100,10 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
 
       <div className="flex-1 overflow-y-auto">
         {/* 用户信息 */}
-        <div className="px-4 py-3 flex items-center gap-3">
+        <div
+          className={`px-4 py-3 flex items-center gap-3 ${!post.is_anonymous ? 'cursor-pointer touch-manipulation select-none' : ''}`}
+          onClick={() => { if (!post.is_anonymous) setShowProfile(true); }}
+        >
           <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
             <Icon name="person" className="text-lg text-gray-400" />
           </div>
@@ -112,7 +118,9 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
           </div>
           {post.is_anonymous ? (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-gray-400">匿名</span>
-          ) : null}
+          ) : (
+            <Icon name="chevron_right" className="text-gray-300 text-sm shrink-0" />
+          )}
         </div>
 
         {/* 内容 */}
@@ -215,6 +223,23 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
           )}
         </div>
       </div>
+
+      {/* 个人主页 overlay */}
+      {showProfile && (
+        <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col">
+          <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
+            <ProfilePage
+              userId={post.user_id || 0}
+              onBack={() => setShowProfile(false)}
+              placeholder={{
+                name: post.nickname || '',
+                avatar: '',
+                isVerified: post.auth_status === 'verified',
+              }}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {/* 评论输入 */}
       <div className="border-t border-gray-100 px-4 py-3 bg-white">

@@ -14,6 +14,7 @@ export interface CircleInfo {
 
 export interface CirclePost {
   id: number;
+  user_id: number;
   circle_id: string;
   content: string;
   images: string[] | null;
