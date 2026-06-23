@@ -280,9 +280,16 @@ function PostGridItem({ post }: { post: Listing }) {
           onError={() => setImgError(true)}
         />
       ) : (
-        <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 p-2">
-          <Icon name="post_add" className="text-2xl mb-1" />
-          <span className="text-[9px] text-center line-clamp-2 text-gray-400">{post.title}</span>
+        <div className="w-full h-full flex flex-col justify-between p-2 bg-gradient-to-br from-slate-50 to-slate-100">
+          <span className={`text-[8px] font-semibold px-1 py-0.5 rounded self-start ${
+            post.postType === 'sell' ? 'bg-course-red/10 text-course-red' :
+            post.postType === 'activity' ? 'bg-course-blue/10 text-course-blue' :
+            'bg-slate-200 text-gray-500'
+          }`}>
+            {post.postType === 'sell' ? '二手' : post.postType === 'lost' ? '失物' : post.postType === 'found' ? '招领' : post.postType === 'activity' ? '活动' : post.postType === 'carpool' ? '拼车' : post.postType === 'job' ? '兼职' : post.postType === 'study' ? '学习' : '其他'}
+          </span>
+          <span className="text-[9px] text-gray-500 line-clamp-2 leading-tight">{post.title}</span>
+          <span className="text-[8px] text-gray-400">{post.price ? `¥${post.price}` : post.views ? `${post.views}次浏览` : ''}</span>
         </div>
       )}
       {/* 遮罩层 */}
