@@ -324,6 +324,35 @@ export function useAppData() {
     };
   }, [profile.studentId, syncMessages]);
 
+  // ── 登录后从 API 刷新 profile（覆盖 localStorage 旧缓存）──
+  useEffect(() => {
+    const token = getToken();
+    if (!token || !profile.studentId) return;
+    try {
+      // 从 JWT payload 提取 user_id
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const userId = payload?.uid;
+      if (!userId) return;
+      api.get<any>(`/users/${userId}/public-profile`)
+        .then((res) => {
+          if (res.code === 0 && res.data) {
+            setProfile((prev) => ({
+              ...prev,
+              avatarUrl: res.data.avatarUrl || prev.avatarUrl,
+              coverUrl: res.data.coverUrl || prev.coverUrl,
+              bio: res.data.bio || prev.bio,
+              department: res.data.department || prev.department,
+              orgLevel: res.data.orgLevel || prev.orgLevel,
+              orgName: res.data.orgName || prev.orgName,
+              position: res.data.position || prev.position,
+              isVerified: res.data.isVerified ?? prev.isVerified,
+            }));
+          }
+        })
+        .catch(() => {});
+    } catch { /* JWT 解析失败静默 */ }
+  }, [profile.studentId]);
+
   // ── localStorage 持久化（合并为一次写入，避免连续触发多次 setItem）──
   useEffect(() => {
     saveToStorage('listings', listings);
