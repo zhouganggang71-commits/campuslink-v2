@@ -51,7 +51,7 @@ export default function App() {
   const isMounted = (tab: string) => mountedTabs.has(tab);
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 text-on-surface font-sans antialiased pb-20 flex flex-col items-center">
+    <div className="w-full min-h-screen bg-slate-50 text-on-surface font-sans antialiased flex flex-col items-center">
       <OfflineBanner />
       <Toast toast={d.toast} />
 
@@ -63,7 +63,7 @@ export default function App() {
         onMessagesClick={handleMessagesClick}
       />
 
-      <main className="w-full max-w-md bg-white h-[calc(100vh-3.5rem)] shadow-sm flex flex-col relative pb-10 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <main className="w-full max-w-md bg-white h-[calc(100vh-3.5rem-4rem)] shadow-sm flex flex-col relative overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
         {d.selectedListing ? (
           <ListingDetail
