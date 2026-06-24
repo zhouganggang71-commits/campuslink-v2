@@ -193,7 +193,9 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
           data = await new (PDFParse as any)(req.file.buffer);
         }
         const text = data.text;
-        if (!text || text.length < 20) return fail(res, 400, 'PDF 未提取到文本，可能是扫描件');
+        if (!text || text.length < 20) {
+          return fail(res, 400, 'PDF 无法识别（可能是扫描件或图片型 PDF）。请尝试：1) 从教务系统导出时选择"文字型 PDF"；2) 切换到「粘贴 HTML」标签，复制课表网页内容直接粘贴解析');
+        }
 
         const courses = parseScheduleText(text);
         logger.business('PDF解析', { pages: data.numpages, textLen: text.length, courses: courses.length, trace_id: req._traceId });

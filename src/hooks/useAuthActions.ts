@@ -55,7 +55,7 @@ export function useAuthActions(d: AuthDataLayer) {
       try {
         localStorage.setItem('campuslink_profile', JSON.stringify(newProfile));
         Object.keys(localStorage)
-          .filter((k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_profile'].includes(k))
+          .filter((k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_profile', 'campuslink_schema_version'].includes(k))
           .forEach((k) => localStorage.removeItem(k));
       } catch { /* noop */ }
       d.setProfile(newProfile);
