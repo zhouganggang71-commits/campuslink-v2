@@ -59,21 +59,50 @@ const TEACHER_SUFFIX = '(教授|老师|讲师|助教)';
 const COMMON_SURNAMES = '[张李王刘陈孙赵周吴郑冯蒋沈韩杨朱秦许何吕施任姜邹苏潘葛范彭韦马苗花方俞袁柳酆鲍史唐费廉岑薛贺倪汤滕殷罗毕郝邬安常乐于时傅皮下齐康伍余元卜顾孟黄穆萧尹姚邵汪毛禹狄米贝臧计伏成戴谈宋茅熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉钮龚程嵇邢滑裴陆荣翁荀羊於惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸韶郜黎蓟薄印宿白怀蒲邰从索咸籍赖卓蔺屠蒙池乔阴郁胥苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍卻璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公]';
 
 /**
- * 解析"课程索引"格式：无分隔符的紧凑中文文本
- * 如: "1高等数学 A张教授教1-201周一 第1-2节"
+ * 解析"课程索引"区域 — 支持两种格式：
+ * A) 多行: 每门课跨4行(课程名/教师/教室/时间)
+ * B) 紧凑单行: "1高等数学 A张教授教1-201周一 第1-2节"
  */
 function parseIndexSection(text: string) {
+  // ── 策略A: 紧凑单行（先试，因为更常见）──
+  const compactRe = new RegExp(
+    `(\\d{1,2})\\s*` +                                    // 序号
+    `(.+?)` +                                              // 课程名
+    `(${COMMON_SURNAMES})${TEACHER_SUFFIX}` +             // 教师
+    `([A-Za-z0-9\\u4e00-\\u9fff\\-]+?)` +                 // 教室
+    `周([一二三四五六日])\\s*第(\\d+)[-~至](\\d+)节`,    // 周X 第N-M节
+    'g'
+  );
   const courses: any[] = [];
   const seen = new Set<string>();
-  const allLines = text.split(/[\r\n]+/).filter(Boolean);
 
-  // 匹配: "序号 title" 行（可能含<b>标记）
+  let m;
+  while ((m = compactRe.exec(text)) !== null) {
+    const name = m[2].trim();
+    const teacher = m[3] + m[4];
+    const room = m[5].trim();
+    const wd = getWeekday(m[6]);
+    const sp = parseInt(m[7]);
+    const ep = parseInt(m[8]);
+    if (!wd || !name || sp < 1) continue;
+    const key = `${name}|${wd}|${sp}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    courses.push({
+      name, teacher, classroom: room, weekday: wd,
+      startPeriod: sp, periodSpan: ep - sp + 1,
+      weekStart: 1, weekEnd: 18, weekType: 'all' as const,
+      courseType: 'theory' as const,
+      colorClass: 'bg-course-blue text-white',
+    });
+  }
+  if (courses.length > 0) return courses;
+
+  // ── 策略B: 多行格式 ──
+  const allLines = text.split(/[\r\n]+/).filter(Boolean);
   const courseRe = /^(\d{1,2})\s+(?:<b>)?(.+?)(?:<\/b>)?$/;
-  // 匹配: "姓氏+职称" 行
   const teacherRe = new RegExp(`^(${COMMON_SURNAMES})${TEACHER_SUFFIX}$`);
-  // 匹配: "教室编号" 行
   const roomRe = /^[A-Za-z0-9\u4e00-\u9fff]+[-\u4e00-\u9fff]*\d+[A-Za-z\u4e00-\u9fff\-]*$/;
-  // 匹配: "周X 第N-M节"
   const schedRe = /周([一二三四五六日])\s*第(\d+)[-~至](\d+)节/;
 
   for (let i = 0; i < allLines.length; i++) {
@@ -81,7 +110,6 @@ function parseIndexSection(text: string) {
     if (!cm) continue;
     const name = cm[2].trim().replace(/<[^>]+>/g, '');
     let teacher = '', room = '', wd = 0, sp = 0, ep = 0;
-
     for (let j = 1; j <= 4 && i + j < allLines.length; j++) {
       const ln = allLines[i + j].trim();
       const tm = ln.match(teacherRe);
@@ -90,12 +118,10 @@ function parseIndexSection(text: string) {
       const sm = ln.match(schedRe);
       if (sm) { wd = getWeekday(sm[1]); sp = parseInt(sm[2]); ep = parseInt(sm[3]); i += j; break; }
     }
-
     if (!wd || !name || sp < 1) continue;
     const key = `${name}|${wd}|${sp}`;
     if (seen.has(key)) continue;
     seen.add(key);
-
     courses.push({
       name, teacher, classroom: room, weekday: wd,
       startPeriod: sp, periodSpan: ep - sp + 1,
