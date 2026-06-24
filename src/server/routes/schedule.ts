@@ -171,14 +171,19 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
   app.post('/api/v1/parse-schedule', auth, limiter(5),
     (req: Request, res: Response, next: NextFunction) => {
       pdfUpload.single('file')(req, res, (err: any) => {
-        if (err) return fail(res, 400, err.code === 'LIMIT_FILE_SIZE' ? '文件不能超过10MB' : '上传失败');
+        if (err) return fail(res, 400, err.code === 'LIMIT_FILE_SIZE' ? '文件不能超过5MB' : '上传失败');
         next();
       });
     },
     async (req: Request, res: Response) => {
       if (!req.file) return fail(res, 400, '请上传 PDF 文件');
-      const ext = req.file.originalname?.toLowerCase().split('.').pop();
-      if (ext !== 'pdf' || req.file.mimetype !== 'application/pdf') return fail(res, 400, '仅支持 PDF 格式');
+      const ext = (req.file.originalname || '').toLowerCase().split('.').pop();
+      // 放宽 MIME 校验：部分浏览器/系统对 PDF 上报 application/octet-stream
+      const validExt = ext === 'pdf';
+      const validMime = req.file.mimetype === 'application/pdf' || req.file.mimetype === 'application/octet-stream';
+      if (!validExt || !validMime) {
+        return fail(res, 400, `仅支持 PDF 格式（当前类型：${req.file.mimetype}）`);
+      }
 
       try {
         const mod = await import('pdf-parse');

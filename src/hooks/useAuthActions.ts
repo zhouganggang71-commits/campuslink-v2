@@ -32,15 +32,9 @@ export function useAuthActions(d: AuthDataLayer) {
     });
     if (res.code === 0 && res.data?.token) {
       setSession(res.data.token, res.data.refresh_token);
-      // 清缓存
-      try {
-        Object.keys(localStorage)
-          .filter((k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid'].includes(k))
-          .forEach((k) => localStorage.removeItem(k));
-      } catch { /* noop */ }
       const authStatus = res.data?.user?.authStatus || 'pending';
       const verified = authStatus === 'verified' || authStatus === 'org_verified';
-      d.setProfile({
+      const newProfile: StudentProfile = {
         ...INITIAL_PROFILE,
         fullName,
         department: res.data?.user?.department || department,
@@ -55,7 +49,16 @@ export function useAuthActions(d: AuthDataLayer) {
         bio: res.data?.user?.bio || '',
         postsCount: 0,
         savedCount: 0,
-      });
+      };
+      // 先持久化 profile，再清其他缓存——避免清完到 useEffect 保存之间的窗口期
+      // 导致刷新后 token 有效但 profile 丢失、用户显示为游客。
+      try {
+        localStorage.setItem('campuslink_profile', JSON.stringify(newProfile));
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_profile'].includes(k))
+          .forEach((k) => localStorage.removeItem(k));
+      } catch { /* noop */ }
+      d.setProfile(newProfile);
       if (authStatus === 'pending') d.showToast('注册成功！等待管理员审核', 'info');
       else if (authStatus === 'org_verified') d.showToast('组织身份已认证', 'success');
       d.setIsAuthModalOpen(false);
