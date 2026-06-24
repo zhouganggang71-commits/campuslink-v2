@@ -3,7 +3,7 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { Course, COURSE_COLORS } from '../types';
-import { api } from '../utils/api';
+import { uploadApi } from '../api';
 
 export function useScheduleOCR(onImportCourses: (courses: Omit<Course, 'id'>[]) => void) {
   const [ocrResult, setOcrResult] = useState<Omit<Course, 'id'>[] | null>(null);
@@ -28,7 +28,7 @@ export function useScheduleOCR(onImportCourses: (courses: Omit<Course, 'id'>[]) 
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       if (!mountedRef.current) { pollingRef.current = false; return; }
-      const pollRes = await api.get<{ status: string; courses?: any[]; error?: string }>(`/ocr-schedule/${taskId}`);
+      const pollRes = await uploadApi.pollScheduleResult(taskId);
       if (pollRes.code !== 0) continue;
       const task = pollRes.data;
       if (task?.status === 'done' && task.courses && task.courses.length > 0) {
@@ -87,7 +87,7 @@ export function useScheduleOCR(onImportCourses: (courses: Omit<Course, 'id'>[]) 
       fd.append('file', file);
       if (isPdf) {
         setOcrProgress('正在解析 PDF 课表...');
-        const data = await api.upload<{ courses: any[]; rawText: string }>('/parse-schedule', fd);
+        const data = await uploadApi.parseSchedulePDF(fd) as any;
         if (uploadEpoch.current !== epoch || !mountedRef.current) return;
         const courses = data.data?.courses;
         if (data.code === 0 && courses && courses.length > 0) {
@@ -96,7 +96,7 @@ export function useScheduleOCR(onImportCourses: (courses: Omit<Course, 'id'>[]) 
           setOcrError(data.message || '未识别到课程，请确认是教务系统导出的 PDF');
         }
       } else {
-        const uploadRes = await api.upload<{ taskId: string }>('/ocr-schedule', fd);
+        const uploadRes = await uploadApi.ocrScheduleImage(fd);
         if (uploadEpoch.current !== epoch || !mountedRef.current) return;
         if (uploadRes.code !== 0 || !uploadRes.data?.taskId) {
           setOcrError(uploadRes.message || '上传失败，请重试');

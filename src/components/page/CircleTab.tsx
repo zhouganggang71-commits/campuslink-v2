@@ -3,7 +3,8 @@
  */
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { useCircles } from '../../hooks/useCircles';
-import { api, getToken } from '../../utils/api';
+import { getToken } from '../../utils/api';
+import { circlesApi } from '../../api';
 import Button from '../ui/Button';
 import Icon from '../ui/Icon';
 import Pagination from '../ui/Pagination';
@@ -42,7 +43,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
     posts, loading, page, totalPages, goToPage,
     init, switchCircle, searchPosts,
     prependPost, updateLikeCount,
-    initialLoaded,
+    initialLoaded, initError, retryInit,
   } = useCircles();
 
   const [publishOpen, setPublishOpen] = useState(false);
@@ -57,7 +58,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
 
   useEffect(() => {
     if (!getToken()) return;
-    api.get<any[]>('/circle-favorites').then((res) => {
+    circlesApi.getFavorites().then((res) => {
       if (res.code === 0 && Array.isArray(res.data)) {
         setSavedIds(new Set(res.data.map((p: any) => p.id)));
       }
@@ -79,12 +80,16 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
 
   const filteredPosts = posts;
 
-  const handleLike = useCallback(async (postId: number) => {
-    if (isGuest) return showToast('请先登录');
+  const handleLike = useCallback(async (postId: number): Promise<boolean> => {
+    if (isGuest) { showToast('请先登录'); return false; }
     try {
-      const res = await api.post(`/circle-posts/${postId}/like`);
-      if (res.code === 0) updateLikeCount(postId, (res.data as any).like_count || 0);
-    } catch { /* noop */ }
+      const res = await circlesApi.like(postId);
+      if (res.code === 0) {
+        updateLikeCount(postId, (res.data as any).like_count || 0);
+        return true;
+      }
+      return false;
+    } catch { return false; }
   }, [isGuest, updateLikeCount, showToast]);
 
   const handleSave = useCallback(async (postId: number) => {
@@ -96,7 +101,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
       return next;
     });
     try {
-      const res = await api.post(`/circle-posts/${postId}/favorite`);
+      const res = await circlesApi.toggleFav(postId);
       if (res.code !== 0) {
         setSavedIds((prev) => {
           const next = new Set(prev);
@@ -218,7 +223,13 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
 
       {/* 帖子流 */}
       <div ref={scrollRef} className="flex-1 px-4 py-3 flex flex-col gap-3 overflow-y-auto">
-        {!initialLoaded && loading ? (
+        {initError ? (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+            <Icon name="wifi_off" className="text-4xl text-gray-300" />
+            <p className="text-sm">{initError}</p>
+            <button onClick={retryInit} className="px-4 py-1.5 bg-primary text-white text-xs rounded-full cursor-pointer hover:bg-primary/90 transition-colors">点击重试</button>
+          </div>
+        ) : !initialLoaded && loading ? (
           <div className="flex flex-col gap-3">
             {[1, 2, 3].map((i) => (
               <CardSkeleton key={i} />

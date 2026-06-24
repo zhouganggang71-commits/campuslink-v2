@@ -195,7 +195,7 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
         ok(res, { courses, rawText: text.substring(0, 2000) });
       } catch (err: any) {
         logger.error('PDF解析失败', { error: err.message, trace_id: req._traceId });
-        fail(res, 500, '解析失败：' + (err.message || '未知错误'));
+        fail(res, 500, '解析失败，请检查文件格式是否正确');
       }
     },
   );

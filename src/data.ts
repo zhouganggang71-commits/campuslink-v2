@@ -344,3 +344,15 @@ export const INITIAL_MESSAGES: Message[] = [
     isRead: true,
   },
 ];
+
+import { Listing as _Listing } from "./types";
+export const POST_TYPE_CHANNELS: { key: _Listing["postType"] | "all"; label: string; icon: string }[] = [
+  { key: "all", label: "全部", icon: "apps" },
+  { key: "sell", label: "二手", icon: "shopping_bag" },
+  { key: "lost", label: "失物", icon: "search" },
+  { key: "found", label: "招领", icon: "volunteer_activism" },
+  { key: "carpool", label: "拼车", icon: "directions_car" },
+  { key: "job", label: "兼职", icon: "work" },
+  { key: "activity", label: "活动", icon: "celebration" },
+  { key: "study", label: "学习", icon: "school" },
+];

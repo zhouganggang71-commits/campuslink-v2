@@ -1,8 +1,15 @@
 /**
- * 数据库 + 认证工具 + 查询追踪
+ * 数据库 + 连接池 + 慢查询追踪 + 熔断保护
  */
 import mysql from 'mysql2/promise';
 import { logger } from '../utils/logger';
+import { CircuitBreaker } from './circuitBreaker';
+
+const dbBreaker = new CircuitBreaker({
+  failureThreshold: 10,
+  resetTimeout: 30_000,
+  name: 'mysql',
+});
 
 const rawPool = mysql.createPool({
   host: '127.0.0.1',
@@ -16,19 +23,28 @@ const rawPool = mysql.createPool({
 });
 
 // ── 慢查询阈值 ──
-const SLOW_QUERY_MS = 200; // 超过 200ms 记录慢查询
+const SLOW_QUERY_MS = 200;
 
 function sqlDigest(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
-// ── 查询追踪 Proxy ──
+// ── 查询追踪 + 熔断 ──
 const _query = rawPool.query.bind(rawPool);
 const _execute = rawPool.execute.bind(rawPool);
 
 function traceQuery(fn: (...args: any[]) => Promise<any>, sql: string, params?: any): Promise<any> {
   const start = Date.now();
-  return fn(sql, params).then(
+
+  return dbBreaker.exec(
+    () => fn(sql, params),
+    // 降级：熔断时返回空结果避免崩溃
+    () => {
+      const isSelect = /^\s*SELECT/i.test(sql);
+      if (!isSelect) throw new Error('数据库熔断中，写操作被拒绝');
+      return [[]]; // SELECT 返回空结果
+    },
+  ).then(
     (result: any) => {
       const duration = Date.now() - start;
       if (duration >= SLOW_QUERY_MS) {
@@ -65,3 +81,7 @@ export const pool = new Proxy(rawPool, {
     return typeof val === 'function' ? val.bind(target) : val;
   },
 });
+
+export function getDbBreakerState() {
+  return dbBreaker.getState();
+}

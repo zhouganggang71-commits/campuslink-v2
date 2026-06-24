@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Modal from '../ui/Modal';
 import Icon from '../ui/Icon';
-import { api } from '../../utils/api';
+import { circlesApi } from '../../api';
 import type { CirclePost } from '../../hooks/useCircles';
 
 interface CircleHotRankingProps {
@@ -33,7 +33,7 @@ export default function CircleHotRanking({ isOpen, onClose }: CircleHotRankingPr
   useEffect(() => {
     if (!isOpen) return;
     setLoading(true);
-    api.get<{ list: CirclePost[] }>('/circles/trending?page=1&size=10')
+    circlesApi.trending({ page: 1, size: 10 })
       .then((res) => {
         if (res.code === 0 && res.data?.list) setPosts(res.data.list);
       })

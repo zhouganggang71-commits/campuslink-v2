@@ -34,7 +34,7 @@ export function signRefreshToken(userId: number): string {
 export function verifyAccessToken(token: string): AccessTokenPayload | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as any;
-    if (payload.type && payload.type !== 'access') return null;
+    if (payload.type !== 'access') return null;
     return { uid: payload.uid, admin: !!payload.admin };
   } catch {
     return null;
@@ -44,7 +44,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
 export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as any;
-    if (payload.type && payload.type !== 'refresh') return null;
+    if (payload.type !== 'refresh') return null;
     return { uid: payload.uid };
   } catch {
     return null;

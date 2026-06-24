@@ -2,7 +2,7 @@
  * 校园圈数据层 — 圈子列表 + 帖子流 + 发布/点赞/评论
  */
 import { useState, useCallback } from 'react';
-import { api } from '../utils/api';
+import { circlesApi } from '../api';
 
 export interface CircleInfo {
   id: string;
@@ -37,14 +37,16 @@ export function useCircles() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
   // 圈子列表 + 初始帖子流合并在一次 effect 完成，避免闪屏
   const init = useCallback(async () => {
     setLoading(true);
+    setInitError(null);
     try {
       const [circlesRes, postsRes] = await Promise.all([
-        api.get<CircleInfo[]>('/circles'),
-        api.get<{ list: CirclePost[]; total: number; totalPages: number }>('/circles/trending?page=1&size=20'),
+        circlesApi.list() as any,
+        circlesApi.trending({ page: 1, size: 20 }),
       ]);
       if (circlesRes.code === 0 && Array.isArray(circlesRes.data)) {
         setCircles(circlesRes.data);
@@ -54,7 +56,9 @@ export function useCircles() {
         setTotalPages(postsRes.data.totalPages || 1);
         setPage(1);
       }
-    } catch { /* noop */ }
+    } catch {
+      setInitError('加载失败，请检查网络后重试');
+    }
     setLoading(false);
     setInitialLoaded(true);
   }, []);
@@ -63,18 +67,15 @@ export function useCircles() {
   const fetchPosts = useCallback(async (circleId: string, pageNum: number, keyword = '') => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(pageNum), size: '20' });
-      if (keyword) params.set('keyword', keyword);
-      const url = circleId === 'trending'
-        ? `/circles/trending?${params}`
-        : `/circles/${circleId}/posts?${params}`;
-      const res = await api.get<{ list: CirclePost[]; total: number; totalPages: number }>(url);
+      const res = circleId === 'trending'
+        ? await circlesApi.trending({ page: pageNum, size: 20, keyword })
+        : await circlesApi.posts(circleId, { page: pageNum, size: 20, keyword });
       if (res.code === 0 && res.data) {
         setPosts(res.data.list);
         setTotalPages(res.data.totalPages || 1);
         setPage(pageNum);
       }
-    } catch { /* noop */ }
+    } catch { /* fetchPosts 失败静默，不影响已有数据 */ }
     setLoading(false);
   }, []);
 
@@ -111,5 +112,7 @@ export function useCircles() {
     init, switchCircle, searchPosts,
     prependPost, updateLikeCount,
     initialLoaded,
+    initError,
+    retryInit: init, // SOP恢复路径：用户点击重试
   };
 }

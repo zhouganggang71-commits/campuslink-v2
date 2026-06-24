@@ -13,7 +13,7 @@ import { decrypt } from '../crypto';
 
 export function registerAdminRoutes(app: any, pool: Pool) {
   // ── 仪表盘统计 ──
-  app.get('/api/v1/admin/stats', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/stats', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const [users]: any = await pool.query('SELECT COUNT(*) as c FROM users');
       const [posts]: any = await pool.query('SELECT COUNT(*) as c FROM posts');
@@ -34,7 +34,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 帖子 ──
-  app.get('/api/v1/admin/posts', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/posts', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
@@ -99,7 +99,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 用户 ──
-  app.get('/api/v1/admin/users', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/users', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const status = (req.query.status as string) || 'all';
       const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
@@ -155,7 +155,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 课表（按用户分组）──
-  app.get('/api/v1/admin/courses', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/courses', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const userId = req.query.user_id as string;
       if (userId) {
@@ -178,7 +178,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 报名 ──
-  app.get('/api/v1/admin/registrations', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/registrations', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = Math.min(200, parseInt(req.query.limit as string) || 50);
@@ -203,7 +203,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 收藏 ──
-  app.get('/api/v1/admin/favorites', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/favorites', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const [rows]: any = await pool.query(
         'SELECT f.*, u.nickname, p.title as post_title FROM favorites f LEFT JOIN users u ON f.user_id = u.id LEFT JOIN posts p ON f.post_id = p.id ORDER BY f.created_at DESC LIMIT 100',
@@ -216,7 +216,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 登录令牌 ──
-  app.get('/api/v1/admin/tokens', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/tokens', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const [rows]: any = await pool.query(
         'SELECT r.*, u.nickname FROM refresh_tokens r LEFT JOIN users u ON r.user_id = u.id ORDER BY r.created_at DESC LIMIT 100',
@@ -229,7 +229,7 @@ export function registerAdminRoutes(app: any, pool: Pool) {
   });
 
   // ── 广告管理 ──
-  app.get('/api/v1/admin/ads', adminAuth, async (req: Request, res: Response) => {
+  app.get('/api/v1/admin/ads', adminAuth, limiter(30), async (req: Request, res: Response) => {
     try {
       const [rows]: any = await pool.query('SELECT * FROM ads ORDER BY priority DESC, id DESC');
       ok(res, rows);
@@ -291,17 +291,24 @@ export function registerAdminRoutes(app: any, pool: Pool) {
         req.body,
       );
       if (!input) return;
-      const fields: string[] = [];
-      const values: any[] = [];
+      // 白名单映射：避免动态拼接列名
+      const setClauses: string[] = [];
+      const setValues: any[] = [];
+      const columnMap: Record<string, string> = {
+        title: 'title', image_url: 'image_url', link_url: 'link_url',
+        is_active: 'is_active', priority: 'priority',
+        start_date: 'start_date', end_date: 'end_date',
+      };
       for (const [k, v] of Object.entries(input)) {
-        if (v !== undefined) {
-          fields.push(`${k} = ?`);
-          values.push(v);
+        const col = columnMap[k];
+        if (col && v !== undefined) {
+          setClauses.push(`${col} = ?`);
+          setValues.push(v);
         }
       }
-      if (fields.length === 0) return fail(res, 400, '无更新内容');
-      values.push(String(req.params.id));
-      await pool.query(`UPDATE ads SET ${fields.join(', ')} WHERE id = ?`, values);
+      if (setClauses.length === 0) return fail(res, 400, '无更新内容');
+      setValues.push(String(req.params.id));
+      await pool.query(`UPDATE ads SET ${setClauses.join(', ')} WHERE id = ?`, setValues);
       logger.business('广告更新', { ad_id: req.params.id, trace_id: req._traceId });
       ok(res, null, '已更新');
     } catch (err: any) {

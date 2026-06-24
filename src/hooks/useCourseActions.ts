@@ -2,7 +2,7 @@
  * 课表相关操作 — 添加、删除、导入、分享
  */
 import { Course } from '../types';
-import { api } from '../utils/api';
+import { coursesApi } from '../api';
 import { useOptimistic } from './useOptimistic';
 
 interface CourseDataLayer {
@@ -85,7 +85,7 @@ export function useCourseActions(d: CourseDataLayer) {
       d.setCourses(d.courses.map((c) =>
         c.id === d.editingCourseId ? { ...c, ...courseData } : c,
       ));
-      api.put(`/courses/${d.editingCourseId}`, courseData)
+      coursesApi.update(d.editingCourseId!, courseData)
         .then(() => d.showToast('课程已更新', 'success'))
         .catch(() => {
           d.setCourses(prevCourses);
@@ -104,8 +104,7 @@ export function useCourseActions(d: CourseDataLayer) {
       ...courseData,
     };
     d.setCourses([...d.courses, newCourse]);
-    api
-      .post('/courses', { ...newCourse, id: undefined })
+    coursesApi.create({ ...newCourse, id: undefined } as any)
       .then(() => d.showToast('课程已添加！', 'success'))
       .catch((err) => {
         console.error('[handleAddCourse]', err);
@@ -132,7 +131,7 @@ export function useCourseActions(d: CourseDataLayer) {
     runDelete(
       d.setCourses,
       id,
-      () => api.delete(`/courses/${id}`),
+      () => coursesApi.delete(id),
       {
         onSuccess: () => d.showToast('课程已删除', 'info'),
         onError: () => d.showToast('删除失败，请重试', 'info'),
@@ -145,7 +144,7 @@ export function useCourseActions(d: CourseDataLayer) {
     const prev = d.courses;
     d.setCourses(newCourses);
 
-    const res = await api.put('/courses/batch', imported);
+    const res = await coursesApi.batchReplace(imported);
     if (res.code !== 0) {
       d.setCourses(prev);
       d.showToast('导入失败，已回滚，请重试', 'info');

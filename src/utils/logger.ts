@@ -172,12 +172,6 @@ export function installGlobalHandlers() {
     });
   });
 
-  process.on('SIGTERM', () => {
-    logger.info('收到 SIGTERM，优雅退出');
-    process.exit(0);
-  });
-  process.on('SIGINT', () => {
-    logger.info('收到 SIGINT，优雅退出');
-    process.exit(0);
-  });
+  // SIGTERM/SIGINT 由 server.ts 统一处理优雅关闭，logger 层不再竞争注册
+  // process.exit 移至 server.ts shutdown() 中统一管理
 }

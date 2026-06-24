@@ -3,6 +3,7 @@
  */
 import { memo } from 'react';
 import Icon from '../ui/Icon';
+import { timeAgo } from '../../utils/time';
 import type { CirclePost } from '../../hooks/useCircles';
 
 interface CircleCardProps {
@@ -17,17 +18,6 @@ const CIRCLE_LABELS: Record<string, string> = {
   trending: '今天发生', study: '学业互助', sports: '约球约饭',
   hobby: '兴趣社团', treehole: '匿名树洞', career: '毕业就业',
 };
-
-function timeAgo(ts: string) {
-  const diff = Date.now() - new Date(ts).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
-  const d = new Date(ts);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 function CircleCardInner({ post, onLike, onSave, onDetail, isSaved }: CircleCardProps) {
   const displayName = post.is_anonymous ? '匿名同学' : (post.nickname || '同学');

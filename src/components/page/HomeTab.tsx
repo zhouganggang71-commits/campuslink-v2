@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Listing, Notice, DEPARTMENTS } from '../../types';
+import { POST_TYPE_CHANNELS } from '../../data';
 import Icon from '../ui/Icon';
 import PostCard from './PostCard';
 import AdBanner from './AdBanner';
@@ -7,19 +8,8 @@ import Button from '../ui/Button';
 import { CardSkeleton } from '../ui/Skeleton';
 import ScrollToTop from '../ui/ScrollToTop';
 
-const CHANNELS: { key: Listing['postType'] | 'all'; label: string; icon: string }[] = [
-  { key: 'all', label: '全部', icon: 'apps' },
-  { key: 'sell', label: '二手', icon: 'shopping_bag' },
-  { key: 'lost', label: '失物', icon: 'search' },
-  { key: 'found', label: '招领', icon: 'volunteer_activism' },
-  { key: 'carpool', label: '拼车', icon: 'directions_car' },
-  { key: 'job', label: '兼职', icon: 'work' },
-  { key: 'activity', label: '活动', icon: 'celebration' },
-  { key: 'study', label: '学习', icon: 'school' },
-];
-
 function postTypeLabel(pt: string) {
-  return CHANNELS.find((p) => p.key === pt)?.label || pt;
+  return POST_TYPE_CHANNELS.find((p) => p.key === pt)?.label || pt;
 }
 interface HomeTabProps {
   listings: Listing[];
@@ -36,6 +26,8 @@ interface HomeTabProps {
   onLoadMore: () => void;
   hasMore: boolean;
   loading: boolean;
+  listError?: string | null;
+  onRetry?: () => void;
 }
 
 export default function HomeTab({
@@ -53,6 +45,8 @@ export default function HomeTab({
   onLoadMore,
   hasMore,
   loading,
+  listError,
+  onRetry,
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
   const [showMine, setShowMine] = useState(false);
@@ -182,7 +176,7 @@ export default function HomeTab({
 
         {/* 分类筛选 */}
         <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-          {CHANNELS.map((ch) => (
+          {POST_TYPE_CHANNELS.map((ch) => (
             <button
               key={ch.key}
               onClick={() => setSelectedPostType(ch.key)}
@@ -247,8 +241,14 @@ export default function HomeTab({
           </div>
         )}
 
-        {/* ── 帖子列表 ── */}
-        {!showInitialSkeleton && filtered.length === 0 ? (
+        {/* ── 帖子列表/空态/错误 ── */}
+        {listError && listings.length === 0 && !loading ? (
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+            <Icon name="wifi_off" className="text-4xl opacity-60" />
+            <p className="text-xs font-semibold text-gray-500">{listError}</p>
+            {onRetry && <Button variant="primary" size="sm" onClick={onRetry}>点击重试</Button>}
+          </div>
+        ) : !showInitialSkeleton && filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-slate-50 rounded-2xl border border-dashed border-gray-200">
             <Icon name="inbox" className="text-4xl mb-2 opacity-60" />
             <p className="text-xs font-semibold text-gray-500">暂无内容</p>

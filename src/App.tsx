@@ -1,12 +1,12 @@
 /**
  * CampusLink 主入口 — 纯渲染，数据层和业务层已拆分到 hooks/
  */
-import { lazy, Suspense, useCallback } from 'react';
+import { lazy, Suspense, useCallback, useState, useEffect, useRef } from 'react';
 import { Listing, Course } from './types';
 import { useAppData, clearStorageCache } from './hooks/useAppData';
 import { useAppActions } from './hooks/useAppActions';
 import { setSession } from './utils/api';
-import { INITIAL_PROFILE } from './data';
+import { INITIAL_PROFILE, POST_TYPE_CHANNELS } from './data';
 import Icon from './components/ui/Icon';
 import Toast from './components/ui/Toast';
 import Button from './components/ui/Button';
@@ -27,19 +27,8 @@ const ProfileTab = lazy(() => import('./components/page/ProfileTab'));
 const ListingDetail = lazy(() => import('./components/page/ListingDetail'));
 const SearchPage = lazy(() => import('./components/page/SearchPage'));
 
-const POST_TYPES: { key: Listing['postType'] | 'all'; label: string; icon: string }[] = [
-  { key: 'all', label: '全部', icon: 'apps' },
-  { key: 'sell', label: '二手', icon: 'shopping_bag' },
-  { key: 'lost', label: '失物', icon: 'search' },
-  { key: 'found', label: '招领', icon: 'volunteer_activism' },
-  { key: 'carpool', label: '拼车', icon: 'directions_car' },
-  { key: 'job', label: '兼职', icon: 'work' },
-  { key: 'activity', label: '活动', icon: 'celebration' },
-  { key: 'study', label: '学习', icon: 'school' },
-];
-
 function postTypeLabel(pt: string) {
-  return POST_TYPES.find((p) => p.key === pt)?.label || pt;
+  return POST_TYPE_CHANNELS.find((p) => p.key === pt)?.label || pt;
 }
 
 export default function App() {
@@ -47,6 +36,19 @@ export default function App() {
   const a = useAppActions(d);
 
   const clearListing = useCallback(() => d.setSelectedListing(null), [d.setSelectedListing]);
+  const handleMessagesClick = useCallback(() => {
+    d.setActiveTab('messages');
+    d.setSelectedListing(null);
+  }, [d.setActiveTab, d.setSelectedListing]);
+
+  // Tab 懒加载：首次切换到某 Tab 才挂载，之后用 display:none 保活
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(new Set(['home']));
+  useEffect(() => {
+    if (!mountedTabs.has(d.activeTab)) {
+      setMountedTabs((prev) => new Set([...prev, d.activeTab]));
+    }
+  }, [d.activeTab]);
+  const isMounted = (tab: string) => mountedTabs.has(tab);
 
   return (
     <div className="w-full min-h-screen bg-slate-50 text-on-surface font-sans antialiased pb-20 flex flex-col items-center">
@@ -58,10 +60,7 @@ export default function App() {
         activeTab={d.activeTab}
         unreadCount={d.unreadCount}
         onClearListing={clearListing}
-        onMessagesClick={() => {
-          d.setActiveTab('messages');
-          clearListing();
-        }}
+        onMessagesClick={handleMessagesClick}
       />
 
       <main className="w-full max-w-md bg-white h-[calc(100vh-3.5rem)] shadow-sm flex flex-col relative pb-10 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -103,9 +102,12 @@ export default function App() {
                 onLoadMore={d.loadMorePosts}
                 hasMore={d.listHasMore}
                 loading={d.listLoading}
+                listError={d.listError}
+                onRetry={d.refreshPosts}
               />
             </div>
 
+            {isMounted('schedule') && (
             <div style={{ display: d.isGuest || d.isPending ? (d.activeTab === 'schedule' ? undefined : 'none') : (d.activeTab === 'schedule' ? undefined : 'none') }}>
               {(d.isGuest || d.isPending) ? (
                 <LockPage isPending={d.isPending} label="课表" onAuth={() => d.setIsAuthModalOpen(true)} />
@@ -136,7 +138,9 @@ export default function App() {
                 />
               )}
             </div>
+            )}
 
+            {isMounted('publish') && (
             <div style={{ display: d.isGuest || d.isPending ? (d.activeTab === 'publish' ? undefined : 'none') : (d.activeTab === 'publish' ? undefined : 'none') }}>
               {(d.isGuest || d.isPending) ? (
                 <LockPage isPending={d.isPending} label="发布" onAuth={() => d.setIsAuthModalOpen(true)} />
@@ -154,7 +158,9 @@ export default function App() {
                 />
               )}
             </div>
+            )}
 
+            {isMounted('circles') && (
             <div style={{ display: d.activeTab === 'circles' ? undefined : 'none' }}>
               <CircleTab
                 showToast={d.showToast}
@@ -162,7 +168,9 @@ export default function App() {
                 onAuth={() => d.setIsAuthModalOpen(true)}
               />
             </div>
+            )}
 
+            {isMounted('messages') && (
             <div style={{ display: d.activeTab === 'messages' ? undefined : 'none' }}>
               <MessagesTab
                 messages={d.messages}
@@ -171,7 +179,9 @@ export default function App() {
                 onDeleteMessage={a.handleDeleteMessage}
               />
             </div>
+            )}
 
+            {isMounted('profile') && (
             <div style={{ display: d.activeTab === 'profile' ? undefined : 'none' }}>
               <ProfileTab
                 profile={d.profile}
@@ -196,6 +206,7 @@ export default function App() {
                 toggleSaveListing={a.toggleSaveListing}
               />
             </div>
+            )}
           </div>
         )}
 

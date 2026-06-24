@@ -16,7 +16,7 @@ const ALLOWED_MIME: Record<string, string> = {
   'image/gif': '47494638',
 };
 
-function validateImageMagic(filePath: string, mimeType: string): boolean {
+export function validateImageMagic(filePath: string, mimeType: string): boolean {
   const expected = ALLOWED_MIME[mimeType];
   if (!expected) return false;
   try {

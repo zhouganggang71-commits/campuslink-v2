@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { ok, fail, validate } from '../response';
 import { ErrorCode } from '../errors';
 import { createCirclePostSchema, createCircleCommentSchema } from '../validators';
+import { checkSensitive } from '../../utils/sensitiveFilter';
 
 export function registerCircleRoutes(app: any, pool: any) {
   // 将 SQL 返回的 JSON 字符串字段解析为数组
@@ -51,8 +52,9 @@ export function registerCircleRoutes(app: any, pool: any) {
       const params: any[] = [];
 
       if (keyword) {
+        const safeKeyword = keyword.slice(0, 100);
         where += " AND (cp.content LIKE ? OR u.nickname LIKE ?)";
-        const like = `%${keyword.replace(/[%_]/g, '\\$&')}%`;
+        const like = `%${safeKeyword.replace(/[%_]/g, '\\$&')}%`;
         params.push(like, like);
       }
 
@@ -96,8 +98,9 @@ export function registerCircleRoutes(app: any, pool: any) {
       const params: any[] = [circleId];
 
       if (keyword) {
+        const safeKeyword = keyword.slice(0, 100);
         where += " AND (cp.content LIKE ? OR u.nickname LIKE ?)";
-        const like = `%${keyword.replace(/[%_]/g, '\\$&')}%`;
+        const like = `%${safeKeyword.replace(/[%_]/g, '\\$&')}%`;
         params.push(like, like);
       }
 
@@ -146,12 +149,10 @@ export function registerCircleRoutes(app: any, pool: any) {
       }
 
       // 敏感词检测
-      if ((req as any).sensitiveFilter) {
-        const hit = (req as any).sensitiveFilter.check(trimmed);
-        if (hit) {
-          logger.security('校园圈敏感词命中', { user_id: userId, word: hit, trace_id: (req as any)._traceId });
-          return fail(res, 400, '内容包含敏感词，请修改后重试');
-        }
+      const sensitive = checkSensitive(trimmed);
+      if (!sensitive.passed) {
+        logger.security('校园圈敏感词命中', { user_id: userId, hit_words: sensitive.hitWords, trace_id: (req as any)._traceId });
+        return fail(res, 400, `内容包含违规词汇：${sensitive.hitWords.slice(0, 5).join('、')}`);
       }
 
       // 5分钟内内容去重
@@ -265,12 +266,10 @@ export function registerCircleRoutes(app: any, pool: any) {
       }
 
       // 敏感词检测
-      if ((req as any).sensitiveFilter) {
-        const hit = (req as any).sensitiveFilter.check(trimmed);
-        if (hit) {
-          logger.security('校园圈评论敏感词命中', { user_id: userId, word: hit, trace_id: (req as any)._traceId });
-          return fail(res, 400, '评论包含敏感词，请修改后重试');
-        }
+      const sensitive = checkSensitive(trimmed);
+      if (!sensitive.passed) {
+        logger.security('校园圈评论敏感词命中', { user_id: userId, hit_words: sensitive.hitWords, trace_id: (req as any)._traceId });
+        return fail(res, 400, `评论包含违规词汇：${sensitive.hitWords.slice(0, 5).join('、')}`);
       }
 
       // 30秒内同帖同内容去重（防手抖连发）

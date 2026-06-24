@@ -15,10 +15,11 @@ import { logger } from '../../utils/logger';
 import { ErrorCode } from '../errors';
 import { ok, fail, notFound, validate } from '../response';
 import { loginSchema, setPasswordSchema } from '../validators';
+import { validateImageMagic } from './upload';
 
 export function registerAuthRoutes(app: any, pool: Pool) {
   // ── 登录/注册 ──
-  app.post('/api/v1/auth/dev-login', limiter(5), async (req: Request, res: Response) => {
+  app.post('/api/v1/auth/dev-login', limiter(5, 20), async (req: Request, res: Response) => {
     try {
       const input = validate(res, loginSchema, req.body);
       if (!input) return;
@@ -204,7 +205,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
   });
 
   // ── 修改密码 ──
-  app.put('/api/v1/auth/password', auth, limiter(3), async (req: Request, res: Response) => {
+  app.put('/api/v1/auth/password', auth, limiter(3, 5), async (req: Request, res: Response) => {
     try {
       const input = validate(res, setPasswordSchema, req.body);
       if (!input) return;
@@ -238,7 +239,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       },
       filename: (_req, _file, cb) => {
         const uid = (_req as any).userId || 'unknown';
-        cb(null, `avatar-${uid}-${Date.now()}${path.extname(_file.originalname) || '.jpg'}`);
+        cb(null, `avatar-${uid}-${Date.now()}.jpg`);
       },
     }),
     limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
@@ -251,6 +252,11 @@ export function registerAuthRoutes(app: any, pool: Pool) {
   app.post('/api/v1/auth/avatar', auth, limiter(5), avatarUpload.single('avatar'), async (req: Request, res: Response) => {
     try {
       if (!req.file) return fail(res, 400, '请选择图片');
+      if (!validateImageMagic(req.file.path, req.file.mimetype)) {
+        fs.unlink(req.file.path, () => {});
+        logger.security('头像上传伪造类型', { mimetype: req.file.mimetype, originalname: req.file.originalname, size: req.file.size, ip: req.ip, trace_id: req._traceId });
+        return fail(res, 400, '仅支持 JPG/PNG/WebP/GIF 格式图片');
+      }
       const avatarUrl = `/campus/uploads/avatars/${req.file.filename}`;
       await pool.query('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, req.userId]);
       logger.business('头像更新', { user_id: req.userId, trace_id: req._traceId });
@@ -271,7 +277,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       },
       filename: (req: any, _file, cb) => {
         const uid = req.userId || 'unknown';
-        cb(null, `cover-${uid}-${Date.now()}${path.extname(_file.originalname) || '.jpg'}`);
+        cb(null, `cover-${uid}-${Date.now()}.jpg`);
       },
     }),
     limits: { fileSize: 4 * 1024 * 1024 }, // 封面允许 4MB
@@ -284,6 +290,11 @@ export function registerAuthRoutes(app: any, pool: Pool) {
   app.post('/api/v1/auth/cover', auth, limiter(5), coverUpload.single('cover'), async (req: Request, res: Response) => {
     try {
       if (!req.file) return fail(res, 400, '请选择图片');
+      if (!validateImageMagic(req.file.path, req.file.mimetype)) {
+        fs.unlink(req.file.path, () => {});
+        logger.security('封面上传伪造类型', { mimetype: req.file.mimetype, originalname: req.file.originalname, size: req.file.size, ip: req.ip, trace_id: req._traceId });
+        return fail(res, 400, '仅支持 JPG/PNG/WebP/GIF 格式图片');
+      }
       const coverUrl = `/campus/uploads/covers/${req.file.filename}`;
       await pool.query('UPDATE users SET cover_url = ? WHERE id = ?', [coverUrl, req.userId]);
       logger.business('封面更新', { user_id: req.userId, trace_id: req._traceId });
@@ -312,7 +323,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
   });
 
   // ── 公开用户主页信息 ──
-  app.get('/api/v1/users/:id/public-profile', async (req: Request, res: Response) => {
+  app.get('/api/v1/users/:id/public-profile', limiter(30), async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.id as string);
       if (!userId || userId < 1) return fail(res, 400, '无效的用户ID');

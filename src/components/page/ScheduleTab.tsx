@@ -1,6 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
 import { Course } from '../../types';
-import { api } from '../../utils/api';
 import Icon from '../ui/Icon';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';

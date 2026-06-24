@@ -14,6 +14,7 @@ import multer from "multer";
 import { logger, installGlobalHandlers, setLogDir } from "./src/utils/logger";
 import { pool } from "./src/server/db";
 import { ok, fail } from "./src/server/response";
+import { limiter } from "./src/server/middleware/limiter";
 import { apiSpec } from "./src/server/api-spec";
 import { registerAuthRoutes } from "./src/server/routes/auth";
 import { registerPostRoutes } from "./src/server/routes/posts";
@@ -203,9 +204,26 @@ app.get("/api/v1/ads", async (req: any, res: any) => {
   }
 });
 
-app.post("/api/ads/:id/click", async (req: any, res: any) => {
+// 广告点击去重（同IP+同广告30秒内不重复计）
+const adClickCache = new Map<string, number>();
+app.post("/api/ads/:id/click", limiter(30), async (req: any, res: any) => {
   try {
-    await pool.query("UPDATE ads SET clicks = clicks + 1 WHERE id = ?", [req.params.id]);
+    const adId = req.params.id;
+    const ip = req.ip || 'unknown';
+    const key = `${ip}-${adId}`;
+    const now = Date.now();
+    const lastClick = adClickCache.get(key) || 0;
+    if (now - lastClick < 30_000) {
+      return ok(res, null); // 去重，不计数
+    }
+    adClickCache.set(key, now);
+    // 每60秒清理过期缓存
+    if (adClickCache.size > 1000) {
+      for (const [k, v] of adClickCache) {
+        if (now - v > 60_000) adClickCache.delete(k);
+      }
+    }
+    await pool.query("UPDATE ads SET clicks = clicks + 1 WHERE id = ?", [adId]);
     ok(res, null);
   } catch (err: any) {
     logger.warn('广告点击记录失败', { error: err.message, trace_id: req._traceId });

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { DEPARTMENTS, POSITIONS, ORG_LEVELS, ORGANIZATIONS } from '../../types';
+import { uploadApi } from '../../api';
 import Icon from '../ui/Icon';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -54,8 +55,7 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues, sh
       const blob = await compressImage(file);
       const fd = new FormData();
       fd.append('file', blob, 'student-id.jpg');
-      const resp = await fetch('/campus/api/v1/ocr-student-id', { method: 'POST', body: fd });
-      const data = await resp.json();
+      const data = await uploadApi.ocrStudentId(fd);
       if (data.code === 0 && data.data) {
         if (data.data.name) setFullName(data.data.name);
         if (data.data.studentId) setStudentId(data.data.studentId);

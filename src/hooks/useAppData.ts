@@ -4,7 +4,29 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Listing, Course, Message, StudentProfile } from '../types';
 import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_NOTICES } from '../data';
-import { api, getToken } from '../utils/api';
+import { getToken } from '../utils/api';
+import { coursesApi, postsApi, noticesApi, authApi } from '../api';
+import { safeParseJsonArray } from '../utils/time';
+
+// 缓存版本号：数据结构变更时递增，不兼容旧缓存自动清空
+const SCHEMA_VERSION = 2;
+const VERSION_KEY = 'campuslink_schema_version';
+
+function checkAndMigrateStorage() {
+  try {
+    const stored = localStorage.getItem(VERSION_KEY);
+    const version = stored ? parseInt(stored, 10) : 0;
+    if (version < SCHEMA_VERSION) {
+      // 版本不兼容，清空所有缓存数据（保留 token/session）
+      clearStorageCache();
+      localStorage.setItem(VERSION_KEY, String(SCHEMA_VERSION));
+    }
+  } catch {
+    localStorage.setItem(VERSION_KEY, String(SCHEMA_VERSION));
+  }
+}
+// 启动时执行一次版本检查
+checkAndMigrateStorage();
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
@@ -25,11 +47,12 @@ function loadFromStorage<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-function saveToStorage(key: string, value: any) {
+function saveToStorage(key: string, value: any): boolean {
   try {
     localStorage.setItem(`campuslink_${key}`, JSON.stringify(value));
+    return true;
   } catch {
-    /* noop */
+    return false; // 配额超限或存储不可用
   }
 }
 
@@ -56,6 +79,7 @@ export function useAppData() {
   const [listHasMore, setListHasMore] = useState(true);
   const [listLoading, setListLoading] = useState(false);
   const [listRefreshing, setListRefreshing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('courses', INITIAL_COURSES));
   const [messages, setMessages] = useState<Message[]>(() => loadFromStorage('messages', []));
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -119,8 +143,7 @@ export function useAppData() {
   // ── 服务端数据拉取（缓存优先，无缓存才拉服务端） ──
   const syncCourses = () => {
     if (!getToken()) return;
-    api
-      .get<{ data: any[] }>('/courses')
+    coursesApi.list()
       .then((res) => {
         if (res.code === 0 && res.data) {
           const serverCourses = (Array.isArray(res.data) ? res.data : (res.data as any).data || []).map(
@@ -148,10 +171,7 @@ export function useAppData() {
   const syncPosts = (page = 1, append = false) => {
     if (listLoading) return;
     setListLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: '20' });
-    if (selectedPostType !== 'all') params.set('type', selectedPostType);
-    api
-      .get<{ list: any[]; total: number }>(`/posts?${params}`)
+    postsApi.list({ page, limit: 20, type: selectedPostType !== 'all' ? selectedPostType : undefined })
       .then((res) => {
         if (res.code === 0 && res.data) {
           const serverListings = (res.data.list || []).map(
@@ -162,7 +182,7 @@ export function useAppData() {
                 price: p.price,
                 originalPrice: p.original_price,
                 description: p.description,
-                imageUrls: Array.isArray(p.image_urls) ? p.image_urls : (p.image_urls ? JSON.parse(p.image_urls) : []),
+                imageUrls: safeParseJsonArray(p.image_urls),
                 category: p.category,
                 postType: p.post_type,
                 publisherId: p.user_id || 0,
@@ -184,9 +204,12 @@ export function useAppData() {
           setListings(prev => append ? [...prev, ...serverListings] : serverListings);
           setListHasMore(serverListings.length >= 20);
           setListPage(page);
+          setListError(null); // 成功清除错误
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!append) setListError('加载失败，请检查网络后重试');
+      })
       .finally(() => {
         setListLoading(false);
         setListRefreshing(false);
@@ -203,8 +226,7 @@ export function useAppData() {
   };
   const syncFavorites = () => {
     if (!getToken() || !profile.studentId) return;
-    api
-      .get<any[]>('/favorites')
+    postsApi.getFavorites()
       .then((res) => {
         if (res.code === 0 && Array.isArray(res.data)) {
           const ids = res.data.map((p: any) => String(p.id));
@@ -257,8 +279,7 @@ export function useAppData() {
 
   const syncMessages = useCallback(() => {
     if (!getToken()) return;
-    api
-      .get<any[]>('/notices')
+    noticesApi.list()
       .then((res) => {
         if (res.code === 0 && Array.isArray(res.data)) {
           const serverMessages: Message[] = res.data.map((n: any) => ({
@@ -333,7 +354,7 @@ export function useAppData() {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const userId = payload?.uid;
       if (!userId) return;
-      api.get<any>(`/users/${userId}/public-profile`)
+      authApi.getPublicProfile(userId)
         .then((res) => {
           if (res.code === 0 && res.data) {
             setProfile((prev) => ({
@@ -354,12 +375,18 @@ export function useAppData() {
   }, [profile.studentId]);
 
   // ── localStorage 持久化（合并为一次写入，避免连续触发多次 setItem）──
+  const quotaWarned = useRef(false);
   useEffect(() => {
-    saveToStorage('listings', listings);
-    saveToStorage('courses', courses);
-    saveToStorage('messages', messages);
-    saveToStorage('profile', profile);
-    saveToStorage('saved', savedListingIds);
+    let failed = false;
+    if (!saveToStorage('listings', listings)) failed = true;
+    if (!saveToStorage('courses', courses)) failed = true;
+    if (!saveToStorage('messages', messages)) failed = true;
+    if (!saveToStorage('profile', profile)) failed = true;
+    if (!saveToStorage('saved', savedListingIds)) failed = true;
+    if (failed && !quotaWarned.current) {
+      quotaWarned.current = true;
+      showToast('存储空间不足，部分数据可能未保存', 'info');
+    }
   }, [listings, courses, messages, profile, savedListingIds]);
 
   // 分类筛选记忆
@@ -403,6 +430,7 @@ export function useAppData() {
     listLoading,
     listRefreshing,
     listHasMore,
+    listError,
     refreshPosts,
     loadMorePosts,
     selectedListing,
@@ -451,3 +479,5 @@ export function useAppData() {
     syncMessages,
   };
 }
+
+export type AppData = ReturnType<typeof useAppData>;

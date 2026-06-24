@@ -2,7 +2,7 @@
  * 帖子相关操作 — 收藏、浏览、发布、删除、举报、复制、编辑
  */
 import { Listing, Message } from '../types';
-import { api } from '../utils/api';
+import { postsApi } from '../api';
 import { useOptimistic } from './useOptimistic';
 
 interface PostDataLayer {
@@ -36,7 +36,7 @@ export function usePostActions(d: PostDataLayer) {
       d.setSavedListingIds,
       listingId,
       (id) => id === listingId,
-      () => api.post(`/favorites/${listingId}`),
+      () => postsApi.toggleFav(listingId),
       {
         onSuccess: (res: any) => {
           d.showToast(res.data?.favorited ? '已加入收藏！' : '已取消收藏', res.data?.favorited ? 'success' : 'info');
@@ -56,7 +56,7 @@ export function usePostActions(d: PostDataLayer) {
     runDelete(
       d.setListings,
       listingId,
-      () => api.delete(`/posts/${listingId}`),
+      () => postsApi.delete(listingId),
       {
         onSuccess: () => d.showToast('已删除', 'info'),
         onError: () => d.showToast('删除失败，请重试', 'info'),
@@ -81,24 +81,37 @@ export function usePostActions(d: PostDataLayer) {
       d.showToast('该帖子无法举报', 'info');
       return;
     }
+    // 仅允许数字ID
+    if (!/^\d+$/.test(listingId)) {
+      d.showToast('该帖子无法举报', 'info');
+      return;
+    }
     if (d.reportedPostIds.current.has(listingId)) {
       d.showToast('您已举报过该帖子', 'info');
       return;
     }
-    d.reportedPostIds.current.add(listingId);
-    d.setMessages((prev: Message[]) => [
-      {
-        id: `msg-${Date.now()}`,
-        title: '举报已提交',
-        content: `您举报的帖子已提交。举报原因：${reason}。管理员将尽快处理。`,
-        timeText: '刚刚',
-        category: 'approval',
-        status: 'update',
-        isRead: false,
-      },
-      ...prev,
-    ]);
-    d.showToast('举报已提交', 'info');
+    postsApi.report(listingId, reason).then((res) => {
+      if (res.code === 0) {
+        d.reportedPostIds.current.add(listingId);
+        d.setMessages((prev: Message[]) => [
+          {
+            id: `msg-${Date.now()}`,
+            title: '举报已提交',
+            content: `您举报的帖子已提交。举报原因：${reason}。管理员将尽快处理。`,
+            timeText: '刚刚',
+            category: 'approval',
+            status: 'update',
+            isRead: false,
+          },
+          ...prev,
+        ]);
+        d.showToast('举报已提交', 'info');
+      } else {
+        d.showToast(res.message || '举报失败，请重试', 'info');
+      }
+    }).catch(() => {
+      d.showToast('举报失败，请重试', 'info');
+    });
   };
 
   const handleStartEdit = (listing: Listing) => {
@@ -139,8 +152,13 @@ export function usePostActions(d: PostDataLayer) {
     };
     d.setListings((prev: Listing[]) => [full, ...prev]);
 
-    api
-      .post('/posts', {
+    const rollbackPublish = (msg: string) => {
+      d.setListings(prevListings);
+      d.setEditingListing(prevEditing);
+      d.showToast(msg || '发布失败，请重试', 'info');
+    };
+
+    postsApi.create({
         title: full.title,
         description: full.description,
         price: full.price,
@@ -153,40 +171,35 @@ export function usePostActions(d: PostDataLayer) {
       .then((res) => {
         const data = res.data as { id: number } | undefined;
         if (res.code === 0 && data?.id) {
+          const serverId = String(data.id);
           d.setListings((prev: Listing[]) =>
-            prev.map((l) => (l.id === listingId ? { ...l, id: String(data.id) } : l)),
+            prev.map((l) => (l.id === listingId ? { ...l, id: serverId } : l)),
           );
+          const reviewMsg: Message = {
+            id: `msg-${Date.now()}`,
+            title: '发布提交审核',
+            content: `您的"${full.title.substring(0, 20)}..."已提交，审核中。`,
+            timeText: '刚刚',
+            category: 'approval',
+            status: 'update',
+            isRead: false,
+          };
+          d.setMessages((prev: Message[]) => [reviewMsg, ...prev]);
+          d.showToast('发布成功', 'success', {
+            label: '查看',
+            onClick: () => {
+              d.setSelectedListing(d.listings.find((l: Listing) => l.id === serverId) || null);
+            },
+          });
         } else {
-          d.setListings(prevListings);
-          d.setEditingListing(prevEditing);
-          d.showToast(res.message || '发布失败，请重试', 'info');
+          rollbackPublish(res.message || '');
         }
       })
       .catch((err) => {
         console.error('[handlePublish]', err);
-        d.setListings(prevListings);
-        d.setEditingListing(prevEditing);
-        d.showToast('发布失败，请重试', 'info');
+        rollbackPublish('');
       });
 
-    const reviewMsg: Message = {
-      id: `msg-${Date.now()}`,
-      title: '发布提交审核',
-      content: `您的"${full.title.substring(0, 20)}..."已提交，审核中。`,
-      timeText: '刚刚',
-      category: 'approval',
-      status: 'update',
-      isRead: false,
-    };
-    d.setMessages((prev: Message[]) => [reviewMsg, ...prev]);
-    d.showToast('发布成功', 'success', {
-      label: '查看',
-      onClick: () => {
-        // 查找已发布帖子（可能还是临时 ID，但列表已更新）
-        const published = d.listings.find((l: Listing) => l.title === full.title && l.publisherName === full.publisherName);
-        if (published) d.setSelectedListing(published);
-      },
-    });
     d.setActiveTab('home');
   };
 

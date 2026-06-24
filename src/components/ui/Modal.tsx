@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 import Icon from './Icon';
 
 interface ModalProps {
@@ -26,15 +26,32 @@ export default function Modal({
   position = 'center',
   showCloseButton = true,
 }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
   if (!isOpen) return null;
 
-  // ── ESC 关闭 + 背景滚动锁定 ──
+  // ── ESC 关闭 + 背景滚动锁定 + 焦点陷阱 ──
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      // Tab 焦点循环
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      }
     };
     document.addEventListener('keydown', handleKey);
     document.body.style.overflow = 'hidden';
+    // 打开时聚焦弹窗
+    modalRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
@@ -55,6 +72,8 @@ export default function Modal({
 
       {/* 卡片 */}
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className={`relative bg-white shadow-2xl z-10 flex flex-col ${
           isCenter ? 'rounded-2xl' : 'rounded-t-[20px]'
         } ${isCenter ? (size === 'sm' ? 'w-full max-w-sm' : 'w-full max-w-md') : 'w-full max-w-lg max-h-[92vh]'}`}

@@ -5,7 +5,7 @@ import { useState, useRef } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Icon from '../ui/Icon';
-import { api } from '../../utils/api';
+import { circlesApi, uploadApi } from '../../api';
 import type { CircleInfo, CirclePost } from '../../hooks/useCircles';
 
 interface CirclePublishModalProps {
@@ -54,7 +54,7 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
       if (imageFiles.length > 0) {
         const form = new FormData();
         imageFiles.forEach((f) => form.append('images', f));
-        const uploadRes = await api.upload<{ urls: string[] }>('/upload', form);
+        const uploadRes = await uploadApi.uploadImage(form) as any;
         if (uploadRes.code === 0 && uploadRes.data?.urls) {
           imageUrls = uploadRes.data.urls;
         } else {
@@ -63,7 +63,7 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
           return;
         }
       }
-      const res = await api.post(`/circles/${circleId}/posts`, {
+      const res = await circlesApi.createPost(circleId, {
         circle_id: circleId,
         content: content.trim(),
         images: imageUrls,

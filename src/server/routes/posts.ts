@@ -53,10 +53,10 @@ export function registerPostRoutes(app: any, pool: Pool) {
         params.push(postType);
       }
       if (keyword) {
-        const terms = keyword.replace(/[+\-*()~<>]/g, '').split(/\s+/).filter(Boolean);
-        if (terms.length > 0) {
+        const safeKeyword = keyword.slice(0, 100).replace(/[+\-*()~<>]/g, '').split(/\s+/).filter(Boolean);
+        if (safeKeyword.length > 0) {
           where += ' AND MATCH(p.title, p.description) AGAINST(? IN BOOLEAN MODE)';
-          params.push(terms.map(w => `+${w}*`).join(' '));
+          params.push(safeKeyword.map(w => `+${w}*`).join(' '));
         }
       }
 
@@ -205,6 +205,47 @@ export function registerPostRoutes(app: any, pool: Pool) {
     } catch (err: any) {
       logger.error('标记已售失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId});
       fail(res, 500, '标记失败');
+    }
+  });
+
+  // ── 举报帖子 ──
+  app.post('/api/v1/posts/:id/report', auth, limiter(5), async (req: Request, res: Response) => {
+    try {
+      if (!req.isVerified) return fail(res, 403, '账号待审核，审核通过后才能举报');
+      const { reason } = req.body || {};
+      const reasonStr = (typeof reason === 'string' ? reason.trim() : '').slice(0, 200);
+      if (!reasonStr) return fail(res, 400, '请填写举报原因');
+
+      const postId = String(req.params.id);
+      const [rows]: any = await pool.query('SELECT id, title, user_id, status FROM posts WHERE id = ?', [postId]);
+      if (rows.length === 0) return notFound(res, '帖子不存在');
+      if (rows[0].status !== 'active') return fail(res, 400, '该帖子无法举报');
+
+      // 同一用户同帖24小时内不可重复举报
+      const [dupRows]: any = await pool.query(
+        'SELECT id FROM feedbacks WHERE user_id = ? AND content LIKE ? AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)',
+        [req.userId, `%[post:${postId}]%`],
+      );
+      if (dupRows.length > 0) return fail(res, 409, '您已在24小时内举报过该帖子');
+
+      const [userRows]: any = await pool.query('SELECT nickname FROM users WHERE id = ?', [req.userId]);
+      const userName = userRows[0]?.nickname || '匿名';
+      await pool.query(
+        'INSERT INTO feedbacks (user_id, user_name, content) VALUES (?, ?, ?)',
+        [req.userId, userName, `[post:${postId}] 举报帖子「${rows[0].title}」：${reasonStr}`],
+      );
+
+      // 向管理员推送通知
+      await pool.query(
+        "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
+        [0, '帖子被举报', `帖子「${rows[0].title}」被用户举报，原因：${reasonStr}`],
+      ).catch(() => {});
+
+      logger.security('帖子举报', { post_id: postId, user_id: req.userId, reason: reasonStr, trace_id: req._traceId });
+      ok(res, null, '举报已提交');
+    } catch (err: any) {
+      logger.error('举报失败', { error: err.message, trace_id: req._traceId });
+      fail(res, 500, '举报失败');
     }
   });
 

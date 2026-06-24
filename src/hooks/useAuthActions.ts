@@ -3,7 +3,7 @@
  */
 import { StudentProfile, OrgLevel, Position } from '../types';
 import { INITIAL_PROFILE } from '../data';
-import { api, setSession } from '../utils/api';
+import { authApi, setSession } from '../api';
 
 interface AuthDataLayer {
   setProfile: React.Dispatch<React.SetStateAction<StudentProfile>>;
@@ -25,14 +25,9 @@ export function useAuthActions(d: AuthDataLayer) {
     password: string,
     confidence: string,
   ) => {
-    const res = await api.post<{ token: string; refresh_token: string; user: any }>('/auth/dev-login', {
-      studentId,
-      fullName,
-      password,
-      department,
-      orgLevel,
-      orgName,
-      position,
+    const res = await authApi.login({
+      studentId, fullName, password, department,
+      orgLevel, orgName, position,
       confidence: confidence || undefined,
     });
     if (res.code === 0 && res.data?.token) {

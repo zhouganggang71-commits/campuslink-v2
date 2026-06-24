@@ -1,6 +1,6 @@
 import { useState, FormEvent, useEffect, useRef, useCallback } from 'react';
 import { Listing, ORGANIZATIONS } from '../../types';
-import { api } from '../../utils/api';
+import { uploadApi } from '../../api';
 import { checkSensitive } from '../../utils/sensitiveFilter';
 import Icon from '../ui/Icon';
 
@@ -240,7 +240,7 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
       const blob = file.size > 500 * 1024 ? await compressImage(file) : file;
       const formData = new FormData();
       formData.append('file', blob, blob instanceof File ? blob.name : 'compressed.jpg');
-      const res = await api.upload<{ url: string }>('/upload', formData);
+      const res = await uploadApi.uploadImage(formData) as any;
       if (res.code === 0 && res.data?.url) {
         update({ imageUrl: res.data.url });
       }

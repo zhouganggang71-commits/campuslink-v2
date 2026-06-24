@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback, lazy, Suspense, useRef } from 'react';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
-import { api, getToken } from '../../utils/api';
+import { getToken } from '../../utils/api';
+import { circlesApi, uploadApi } from '../../api';
+import { timeAgo } from '../../utils/time';
 import type { CirclePost } from '../../hooks/useCircles';
 
 const ProfilePage = lazy(() => import('./ProfilePage'));
@@ -21,20 +23,10 @@ interface CommentItem {
 interface CirclePostDetailProps {
   post: CirclePost;
   onBack: () => void;
-  onLike: (postId: number) => void;
+  onLike: (postId: number) => Promise<boolean>;
   onSave: (postId: number) => void;
   isSaved: boolean;
   showToast: (msg: string, type?: 'success' | 'info') => void;
-}
-
-function timeAgo(ts: string) {
-  const diff = Date.now() - new Date(ts).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return '刚刚';
-  if (m < 60) return `${m}分钟前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}小时前`;
-  return new Date(ts).toLocaleDateString('zh-CN');
 }
 
 export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved, showToast }: CirclePostDetailProps) {
@@ -55,7 +47,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
 
   const loadComments = useCallback(() => {
     setLoading(true);
-    api.get<CommentItem[]>(`/circle-posts/${post.id}/comments`)
+    circlesApi.getComments(post.id)
       .then((res) => {
         if (res.code === 0 && Array.isArray(res.data)) setComments(res.data);
       })
@@ -74,7 +66,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
       const body: any = { content: txt || '📷' };
       if (replyTo) body.parent_id = replyTo.id;
       if (commentImage) body.image_url = commentImage;
-      const res = await api.post(`/circle-posts/${post.id}/comment`, body);
+      const res = await circlesApi.comment(post.id, body.content, body.parent_id, body.image_url);
       if (res.code === 0) {
         setCommentText('');
         setCommentImage(null);
@@ -128,7 +120,7 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
       }
       const form = new FormData();
       form.append('file', file);
-      const res = await api.upload<{ url: string }>('/upload', form);
+      const res = await uploadApi.uploadImage(form) as any;
       if (res.code === 0 && res.data?.url) {
         setCommentImage(res.data.url);
       } else {
@@ -139,10 +131,10 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
-  const handleLikeClick = () => {
+  const handleLikeClick = async () => {
     if (!getToken()) { showToast('请先登录'); return; }
-    onLike(post.id);
-    setLocalLikeCount((c) => c + 1);
+    const ok = await onLike(post.id);
+    if (ok) setLocalLikeCount((c) => c + 1);
   };
 
   return (

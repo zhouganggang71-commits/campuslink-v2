@@ -1,10 +1,17 @@
 import { Request, Response, NextFunction } from "express";
 /**
- * 简易限流（内存计数器）+ 安全日志
+ * 双层限流（秒级 + 分钟级），防暴力破解
  */
 import { logger } from '../../utils/logger';
 
-const rateLimit = new Map<string, { count: number; reset: number }>();
+interface RateEntry {
+  secCount: number;
+  secReset: number;
+  minCount: number;
+  minReset: number;
+}
+
+const rateLimit = new Map<string, RateEntry>();
 
 // 每 60 秒清理过期条目，防止 Map 无限增长
 const CLEANUP_INTERVAL = 60_000;
@@ -17,7 +24,7 @@ function startCleanup() {
     const now = Date.now();
     let deleted = 0;
     for (const [key, entry] of rateLimit) {
-      if (now > entry.reset) {
+      if (now > entry.secReset && now > entry.minReset) {
         rateLimit.delete(key);
         deleted++;
       }
@@ -30,17 +37,30 @@ function startCleanup() {
 
 startCleanup();
 
-export function limiter(maxPerSec: number) {
+export function limiter(maxPerSec: number, maxPerMinute?: number) {
   return (req: Request, res: Response, next: NextFunction) => {
     const ip = req.ip || 'unknown';
     const now = Date.now();
-    const entry = rateLimit.get(ip);
-    if (!entry || now > entry.reset) {
-      rateLimit.set(ip, { count: 1, reset: now + 1000 });
-      return next();
+    let entry = rateLimit.get(ip);
+
+    if (!entry) {
+      entry = { secCount: 0, secReset: now + 1000, minCount: 0, minReset: now + 60_000 };
+      rateLimit.set(ip, entry);
     }
-    if (entry.count >= maxPerSec) {
-      logger.security('限流触发', {
+
+    // 重置过期窗口
+    if (now > entry.secReset) {
+      entry.secCount = 0;
+      entry.secReset = now + 1000;
+    }
+    if (now > entry.minReset) {
+      entry.minCount = 0;
+      entry.minReset = now + 60_000;
+    }
+
+    // 秒级限流
+    if (entry.secCount >= maxPerSec) {
+      logger.security('限流触发(秒级)', {
         ip,
         path: req.originalUrl,
         limit: maxPerSec,
@@ -48,7 +68,20 @@ export function limiter(maxPerSec: number) {
       });
       return res.status(429).json({ code: -1, error: '请求太频繁' });
     }
-    entry.count++;
+
+    // 分钟级限流（可选）
+    if (maxPerMinute && entry.minCount >= maxPerMinute) {
+      logger.security('限流触发(分钟级)', {
+        ip,
+        path: req.originalUrl,
+        limit: maxPerMinute,
+        trace_id: req._traceId,
+      });
+      return res.status(429).json({ code: -1, error: '请求太频繁，请稍后再试' });
+    }
+
+    entry.secCount++;
+    entry.minCount++;
     next();
   };
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Listing } from '../../types';
-import { api } from '../../utils/api';
+import { authApi, postsApi } from '../../api';
+import { safeParseJsonArray } from '../../utils/time';
 import Icon from '../ui/Icon';
 
 interface ProfilePageProps {
@@ -55,7 +56,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
   useEffect(() => {
     if (!userId) return;
     setProfileLoading(true);
-    api.get<UserPublicProfile>(`/users/${userId}/public-profile`)
+    authApi.getPublicProfile(userId)
       .then((res) => {
         if (res.code === 0 && res.data) setProfile(res.data);
       })
@@ -70,7 +71,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
       return;
     }
     setPostsLoading(true);
-    api.get<{ list: any[]; total: number }>(`/posts?userId=${userId}&limit=30`)
+    postsApi.list({ userId, limit: 30 })
       .then((res) => {
         if (res.code === 0 && res.data?.list) {
           setPosts(res.data.list.map((p: any) => ({
@@ -78,7 +79,7 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
             title: p.title,
             price: p.price,
             description: p.description,
-            imageUrls: Array.isArray(p.image_urls) ? p.image_urls : (p.image_urls ? JSON.parse(p.image_urls) : []),
+            imageUrls: safeParseJsonArray(p.image_urls),
             category: p.category,
             postType: p.post_type,
             publisherId: p.user_id || userId,

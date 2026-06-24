@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Icon from '../ui/Icon';
-import { api } from '../../utils/api';
+import { uploadApi } from '../../api';
 import type { Course } from '../../types';
 
 interface ScheduleImportModalProps {
@@ -28,10 +28,10 @@ export default function ScheduleImportModal({ isOpen, onClose, onImport }: Sched
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await api.upload<{ courses: any[]; rawText: string }>('/parse-schedule', form);
+      const res = await uploadApi.parseSchedulePDF(form) as any;
       if (res.code === 0 && res.data?.courses?.length) {
         setResult(res.data.courses);
-        setSelected(new Set(res.data.courses.map((_, i) => i)));
+        setSelected(new Set(res.data.courses.map((_: any, i: number) => i)));
       } else {
         setError(res.message || '未识别到课程');
       }
@@ -43,10 +43,10 @@ export default function ScheduleImportModal({ isOpen, onClose, onImport }: Sched
     if (!htmlText.trim()) return;
     setLoading(true); setError(''); setResult(null);
     try {
-      const res = await api.post<{ courses: any[] }>('/parse-schedule-html', { html: htmlText });
+      const res = await uploadApi.parseScheduleHTML(htmlText) as any;
       if (res.code === 0 && res.data?.courses?.length) {
         setResult(res.data.courses);
-        setSelected(new Set(res.data.courses.map((_, i) => i)));
+        setSelected(new Set(res.data.courses.map((_: any, i: number) => i)));
       } else {
         setError(res.message || '未识别到课程');
       }
@@ -106,7 +106,7 @@ export default function ScheduleImportModal({ isOpen, onClose, onImport }: Sched
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-gray-700">识别到 {result.length} 门课程</span>
               <div className="flex gap-2">
-                <button onClick={() => setSelected(new Set(result.map((_, i) => i)))}
+                <button onClick={() => setSelected(new Set(result.map((_: any, i: number) => i)))}
                   className="text-[10px] text-primary font-semibold">全选</button>
                 <button onClick={() => setSelected(new Set())}
                   className="text-[10px] text-gray-400">取消</button>

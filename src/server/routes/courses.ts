@@ -65,17 +65,17 @@ export function registerCourseRoutes(app: any, pool: Pool) {
     const courses = req.body;
     if (!Array.isArray(courses)) return fail(res, 400, '请求体必须是课程数组');
 
-    // 逐项校验，单项失败跳过而非整批拒绝
-    for (let i = courses.length - 1; i >= 0; i--) {
+    // 逐项校验，单项失败跳过而非整批拒绝（不修改原 req.body）
+    const valid: any[] = [];
+    for (let i = 0; i < courses.length; i++) {
       const parsed = validate(res, createCourseSchema, courses[i]);
       if (!parsed) {
         logger.warn('课表批量导入跳过无效项', { index: i, course: JSON.stringify(courses[i]).slice(0, 200), trace_id: (req as any)._traceId });
-        courses.splice(i, 1);
       } else {
-        courses[i] = parsed;
+        valid.push(parsed);
       }
     }
-    if (courses.length === 0) return fail(res, 400, '没有有效课程可导入');
+    if (valid.length === 0) return fail(res, 400, '没有有效课程可导入');
 
     const conn = await pool.getConnection();
     try {
@@ -85,7 +85,7 @@ export function registerCourseRoutes(app: any, pool: Pool) {
       await conn.query('DELETE FROM courses WHERE user_id = ?', [req.userId]);
 
       // 批量插入
-      for (const c of courses) {
+      for (const c of valid) {
         const col = c.colorClass || 'bg-course-blue text-white';
         await conn.query(
           `INSERT INTO courses (user_id, name, teacher, classroom, weekday, start_period, period_span, week_start, week_end, week_type, course_type, color_class)
@@ -108,11 +108,11 @@ export function registerCourseRoutes(app: any, pool: Pool) {
       }
 
       await conn.commit();
-      logger.business('课表批量导入', { user_id: req.userId, count: courses.length, trace_id: req._traceId });
-      ok(res, { count: courses.length });
+      logger.business('课表批量导入', { user_id: req.userId, count: valid.length, trace_id: req._traceId });
+      ok(res, { count: valid.length });
     } catch (err: any) {
       await conn.rollback();
-      logger.error('课表批量导入失败，已回滚', { error: err.message, user_id: req.userId, count: courses.length, trace_id: req._traceId});
+      logger.error('课表批量导入失败，已回滚', { error: err.message, user_id: req.userId, count: valid.length, trace_id: req._traceId});
       fail(res, 500, '导入失败');
     } finally {
       conn.release();

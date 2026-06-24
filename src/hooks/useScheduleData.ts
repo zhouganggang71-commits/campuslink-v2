@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Course } from '../types';
-import { api } from '../utils/api';
+import { coursesApi } from '../api';
 
 export function useScheduleData() {
   const [courses, setCourses] = useState<Course[]>([]);
@@ -8,9 +8,8 @@ export function useScheduleData() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const fetch = useCallback(() => {
-    api
-      .get<{ data: any[] }>('/courses')
-      .then((res) => {
+    coursesApi.list()
+      .then((res: any) => {
         if (res.code === 0 && res.data) {
           const arr = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
           setCourses(

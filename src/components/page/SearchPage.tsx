@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Listing } from '../../types';
-import { api } from '../../utils/api';
+import { postsApi, circlesApi } from '../../api';
+import { safeParseJsonArray } from '../../utils/time';
 import Icon from '../ui/Icon';
 import type { CirclePost } from '../../hooks/useCircles';
 
@@ -46,8 +47,8 @@ export default function SearchPage({
     setSearching(true);
     try {
       const [postsRes, circlesRes] = await Promise.all([
-        api.get<{ list: any[] }>(`/posts?keyword=${encodeURIComponent(keyword)}&limit=30`),
-        api.get<{ list: CirclePost[] }>(`/circles/trending?keyword=${encodeURIComponent(keyword)}&page=1&size=30`),
+        postsApi.list({ keyword, limit: 30 }) as any,
+        circlesApi.trending({ keyword, page: 1, size: 30 }) as any,
       ]);
 
       // 写入搜索历史（去重，保持最近10条）
@@ -64,7 +65,7 @@ export default function SearchPage({
           title: p.title,
           price: p.price,
           description: p.description,
-          imageUrls: Array.isArray(p.image_urls) ? p.image_urls : (p.image_urls ? JSON.parse(p.image_urls) : []),
+          imageUrls: safeParseJsonArray(p.image_urls),
           category: p.category,
           postType: p.post_type,
           publisherId: p.user_id || 0,

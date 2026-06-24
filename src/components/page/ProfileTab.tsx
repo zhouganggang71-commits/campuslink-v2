@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { StudentProfile, Listing } from '../../types';
 import { useRegistrations } from '../../utils/regContext';
-import { api } from '../../utils/api';
+import { authApi } from '../../api';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
@@ -220,7 +220,7 @@ export default function ProfileTab({
       }
       const form = new FormData();
       form.append('avatar', file);
-      const res = await api.upload<{ avatar_url: string }>('/auth/avatar', form);
+      const res = await authApi.uploadAvatar(form) as any;
       if (res.code === 0 && res.data?.avatar_url) {
         onUpdateProfile((prev) => ({ ...prev, avatarUrl: res.data!.avatar_url }));
         onShowToast('头像已更新');
@@ -254,7 +254,7 @@ export default function ProfileTab({
       }
       const form = new FormData();
       form.append('cover', file);
-      const res = await api.upload<{ cover_url: string }>('/auth/cover', form);
+      const res = await authApi.uploadCover(form) as any;
       if (res.code === 0 && res.data?.cover_url) {
         onUpdateProfile((prev) => ({ ...prev, coverUrl: res.data!.cover_url }));
         onShowToast('封面已更新');
@@ -269,7 +269,7 @@ export default function ProfileTab({
   const handleBioSave = async () => {
     const trimmed = bioDraft.trim().slice(0, 80);
     try {
-      const res = await api.put<{ bio: string }>('/auth/profile', { bio: trimmed });
+      const res = await authApi.updateProfile(trimmed) as any;
       if (res.code === 0) {
         onUpdateProfile((prev) => ({ ...prev, bio: trimmed }));
         onShowToast('签名已更新');
