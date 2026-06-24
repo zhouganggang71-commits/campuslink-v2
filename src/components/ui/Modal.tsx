@@ -27,14 +27,17 @@ export default function Modal({
   showCloseButton = true,
 }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // ── ESC 关闭 + 背景滚动锁定 + 焦点陷阱 ──
-  // 所有 hooks 必须在 early return 之前，保持调用顺序一致
+  // 注意：依赖仅 isOpen，onClose 通过 ref 读取最新值，避免父组件重渲染时
+  // effect 重复执行导致 modalRef.focus() 劫持用户正在输入的焦点。
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
       // Tab 焦点循环
       if (e.key === 'Tab' && modalRef.current) {
         const focusable = modalRef.current.querySelectorAll<HTMLElement>(
@@ -58,7 +61,7 @@ export default function Modal({
       document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
