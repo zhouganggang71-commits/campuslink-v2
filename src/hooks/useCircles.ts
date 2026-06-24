@@ -1,7 +1,7 @@
 /**
  * 校园圈数据层 — 圈子列表 + 帖子流 + 发布/点赞/评论
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { circlesApi } from '../api';
 
 export interface CircleInfo {
@@ -38,6 +38,7 @@ export function useCircles() {
   const [loading, setLoading] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const keywordRef = useRef('');
 
   // 圈子列表 + 初始帖子流合并在一次 effect 完成，避免闪屏
   const init = useCallback(async () => {
@@ -79,21 +80,23 @@ export function useCircles() {
     setLoading(false);
   }, []);
 
-  // 切换圈子（不清空旧帖，避免白屏跳跃）
+  // 切换圈子（不清空旧帖，避免白屏跳跃；清空搜索关键词）
   const switchCircle = useCallback((circleId: string) => {
     setActiveCircle(circleId);
     setPage(1);
+    keywordRef.current = '';
     fetchPosts(circleId, 1);
   }, [fetchPosts]);
 
   // 服务端搜索
   const searchPosts = useCallback((keyword: string) => {
+    keywordRef.current = keyword;
     fetchPosts(activeCircle, 1, keyword);
   }, [activeCircle, fetchPosts]);
 
-  // 翻页
+  // 翻页（保留当前搜索关键词）
   const goToPage = useCallback((pageNum: number) => {
-    fetchPosts(activeCircle, pageNum);
+    fetchPosts(activeCircle, pageNum, keywordRef.current);
   }, [activeCircle, fetchPosts]);
 
   // 发布后本地插入

@@ -131,7 +131,6 @@ export function usePostActions(d: PostDataLayer) {
     if (todayCount >= limit) return d.showToast(`今日发布已达上限（${limit}条）`, 'info');
     d.lastPublishTime.current = now;
 
-    const prevListings = d.listings;
     const prevEditing = d.editingListing;
     const oldId = d.editingListing?.id;
     if (oldId) {
@@ -152,8 +151,16 @@ export function usePostActions(d: PostDataLayer) {
     };
     d.setListings((prev: Listing[]) => [full, ...prev]);
 
+    // 精准回滚：仅删除乐观插入的帖子（oldId 存在时恢复原帖）
+    // 避免全量快照覆盖并发修改（如同时删除了其他帖子）
     const rollbackPublish = (msg: string) => {
-      d.setListings(prevListings);
+      d.setListings((prev: Listing[]) => {
+        let next = prev.filter((l) => l.id !== listingId);
+        if (oldId && prevEditing) {
+          next = [prevEditing, ...next];
+        }
+        return next;
+      });
       d.setEditingListing(prevEditing);
       d.showToast(msg || '发布失败，请重试', 'info');
     };
@@ -185,10 +192,11 @@ export function usePostActions(d: PostDataLayer) {
             isRead: false,
           };
           d.setMessages((prev: Message[]) => [reviewMsg, ...prev]);
+          const publishedListing = { ...full, id: serverId };
           d.showToast('发布成功', 'success', {
             label: '查看',
             onClick: () => {
-              d.setSelectedListing(d.listings.find((l: Listing) => l.id === serverId) || null);
+              d.setSelectedListing(publishedListing);
             },
           });
         } else {

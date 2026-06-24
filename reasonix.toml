@@ -54,7 +54,7 @@ enabled = true   # language server tools; servers launch lazily when used
 # Rules are "Tool" or "Tool(specifier)"; e.g. Bash(go test:*), Edit(src/**).
 mode  = "ask"
 # deny = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
-allow = ["task", "Edit", "Bash(cd /Users/zhenggangzhou/Desktop/campuslink-v2 && npx tsc --noEmit 2>&1)", "Bash(cd /Users/zhenggangzhou/Desktop/campuslink-v2 && npm run build 2>&1)", "explore"]
+allow = ["task", "Edit", "Bash(cd /Users/zhenggangzhou/Desktop/campuslink-v2 && npx tsc --noEmit 2>&1)", "Bash(cd /Users/zhenggangzhou/Desktop/campuslink-v2 && npm run build 2>&1)", "explore", "Bash(cd /Users/zhenggangzhou/Desktop/campuslink-v2 && ls logs/ 2>/dev/null | tail -10)"]
 # ask = ["Edit(src/**)"]   # force a prompt even if otherwise allowed
 
 [sandbox]
