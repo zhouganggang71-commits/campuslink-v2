@@ -27,10 +27,12 @@ export default function Modal({
   showCloseButton = true,
 }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  if (!isOpen) return null;
 
   // ── ESC 关闭 + 背景滚动锁定 + 焦点陷阱 ──
+  // 所有 hooks 必须在 early return 之前，保持调用顺序一致
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       // Tab 焦点循环
@@ -56,7 +58,9 @@ export default function Modal({
       document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
 
   const isCenter = position === 'center';
 
