@@ -40,7 +40,7 @@ function parseWeeks(raw: string): { weekStart: number; weekEnd: number; weekType
 }
 
 /** 常见中文姓氏 + 职称，用于识别教师名称 */
-const TEACHER_SUFFIX = '(?:教授|老师|讲师|助教)';
+const TEACHER_SUFFIX = '(教授|老师|讲师|助教)';
 const COMMON_SURNAMES = '[张李王刘陈孙赵周吴郑冯蒋沈韩杨朱秦许何吕施任姜邹苏潘葛范彭韦马苗花方俞袁柳酆鲍史唐费廉岑薛贺倪汤滕殷罗毕郝邬安常乐于时傅皮下齐康伍余元卜顾孟黄穆萧尹姚邵汪毛禹狄米贝臧计伏成戴谈宋茅熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉钮龚程嵇邢滑裴陆荣翁荀羊於惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸韶郜黎蓟薄印宿白怀蒲邰从索咸籍赖卓蔺屠蒙池乔阴郁胥苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍卻璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公]';
 
 /**
@@ -50,44 +50,41 @@ const COMMON_SURNAMES = '[张李王刘陈孙赵周吴郑冯蒋沈韩杨朱秦许
 function parseIndexSection(text: string) {
   const courses: any[] = [];
   const seen = new Set<string>();
+  const allLines = text.split(/[\r\n]+/).filter(Boolean);
 
-  // 匹配模式: 序号 + 课程名 + 教师 + 教室 + 周X + 时间范围
-  const pattern = new RegExp(
-    `(\\d+)\\s*` +                                      // 序号
-    `(.+?)` +                                            // 课程名（非贪婪）
-    `(${COMMON_SURNAMES})${TEACHER_SUFFIX}` +           // 教师：姓氏+职称
-    `([^周]+?)` +                                        // 教室
-    `周([一二三四五六日])\\s*` +                         // 周几
-    `第(\\d+)[-~至](\\d+)节`,                           // 第N-M节
-    'g'
-  );
+  // 匹配: "序号 title" 行（可能含<b>标记）
+  const courseRe = /^(\d{1,2})\s+(?:<b>)?(.+?)(?:<\/b>)?$/;
+  // 匹配: "姓氏+职称" 行
+  const teacherRe = new RegExp(`^(${COMMON_SURNAMES})${TEACHER_SUFFIX}$`);
+  // 匹配: "教室编号" 行
+  const roomRe = /^[A-Za-z0-9\u4e00-\u9fff]+[-\u4e00-\u9fff]*\d+[A-Za-z\u4e00-\u9fff\-]*$/;
+  // 匹配: "周X 第N-M节"
+  const schedRe = /周([一二三四五六日])\s*第(\d+)[-~至](\d+)节/;
 
-  let m;
-  while ((m = pattern.exec(text)) !== null) {
-    const name = m[2].trim();
-    const teacher = m[3] + m[5]; // m[3] is surname, m[5] would be 教授/老师 — actually m[4] captures the full teacher
-    // Fix: the regex groups are: 1=序号, 2=课程名, 3=姓氏(captured), 4=后缀(captured by TEACHER_SUFFIX), 5=教室, 6=周几, 7=start, 8=end
-    const actualTeacher = m[3] + m[4];
-    const classroom = m[5].trim();
-    const weekday = getWeekday(m[6]);
-    const start = parseInt(m[7]);
-    const end = parseInt(m[8]);
-    if (!weekday || start < 1 || end > 14) continue;
+  for (let i = 0; i < allLines.length; i++) {
+    const cm = allLines[i].match(courseRe);
+    if (!cm) continue;
+    const name = cm[2].trim().replace(/<[^>]+>/g, '');
+    let teacher = '', room = '', wd = 0, sp = 0, ep = 0;
 
-    const key = `${name}|${weekday}|${start}`;
+    for (let j = 1; j <= 4 && i + j < allLines.length; j++) {
+      const ln = allLines[i + j].trim();
+      const tm = ln.match(teacherRe);
+      if (!teacher && tm) { teacher = tm[1] + tm[2]; continue; }
+      if (!room && roomRe.test(ln) && !/^第\d+节/.test(ln)) { room = ln; continue; }
+      const sm = ln.match(schedRe);
+      if (sm) { wd = getWeekday(sm[1]); sp = parseInt(sm[2]); ep = parseInt(sm[3]); i += j; break; }
+    }
+
+    if (!wd || !name || sp < 1) continue;
+    const key = `${name}|${wd}|${sp}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
     courses.push({
-      name,
-      teacher: actualTeacher,
-      classroom,
-      weekday,
-      startPeriod: start,
-      periodSpan: end - start + 1,
-      weekStart: 1,
-      weekEnd: 18,
-      weekType: 'all' as const,
+      name, teacher, classroom: room, weekday: wd,
+      startPeriod: sp, periodSpan: ep - sp + 1,
+      weekStart: 1, weekEnd: 18, weekType: 'all' as const,
       courseType: 'theory' as const,
       colorClass: 'bg-course-blue text-white',
     });
@@ -271,7 +268,7 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
             return fail(res, 500, 'PDF 解析引擎异常');
           }
         }
-        const text = data?.text || '';
+        const text = (data?.text || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ''); // 清洗控制字符
         if (!text || text.length < 20) {
           return fail(res, 400, 'PDF 无法识别（可能是扫描件或图片型 PDF）。请尝试：1) 从教务系统导出时选择"文字型 PDF"；2) 切换到「粘贴 HTML」标签，复制课表网页内容直接粘贴解析');
         }
