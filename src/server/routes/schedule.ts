@@ -10,6 +10,21 @@ import { limiter } from '../middleware/limiter';
 import { ErrorCode } from '../errors';
 import { ok, fail } from '../response';
 
+/** 移除 JSON 不安全的控制字符 */
+function sanitize(s: string): string {
+  return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/\u200B/g, '');
+}
+
+/** 清洗课程数组中所有字符串字段 */
+function sanitizeCourses(courses: any[]): any[] {
+  for (const c of courses) {
+    for (const k of Object.keys(c)) {
+      if (typeof c[k] === 'string') c[k] = sanitize(c[k]);
+    }
+  }
+  return courses;
+}
+
 const WEEKDAY_MAP: Record<string, number> = {
   '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':7,
   '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,
@@ -152,8 +167,79 @@ function parseTableSection(text: string) {
   return courses;
 }
 
+/**
+ * 解析 <b>课程名</b>\n教师\n教室 格式的 PDF 课表表格
+ * 布局: 周一~周日为列, 第N节为行(大学标准: 1-2/3-4/5-6/7-8/9-10节合并)
+ */
+function parseBoldTable(text: string) {
+  const courses: any[] = [];
+  const seen = new Set<string>();
+
+  // 找表头确定列→星期映射
+  const headerMatch = text.match(/周一.*?周[一二三四五六日]/);
+  if (!headerMatch) return courses;
+  const weekdays = (headerMatch[0].match(/周[一二三四五六日]/g) || []).map(w => getWeekday(w));
+
+  // 解析"注"行获取节次分组(如 第1-2节, 第3-4节...)
+  const periodSpanMap = new Map<number, number>();
+  const noteMatch = text.match(/注[：:]\s*([\s\S]+?)(?:\n|$)/);
+  if (noteMatch) {
+    const spans = noteMatch[1].match(/第(\d+)-(\d+)节/g);
+    if (spans) {
+      for (const s of spans) {
+        const m = s.match(/第(\d+)-(\d+)节/);
+        if (m) { const a = parseInt(m[1]), b = parseInt(m[2]); periodSpanMap.set(a, b - a + 1); }
+      }
+    }
+  }
+  // 默认: 双数节（2/4/6/8/10）为空，课程实际占2节
+  if (periodSpanMap.size === 0) {
+    for (let p = 1; p <= 10; p += 2) periodSpanMap.set(p, 2);
+  }
+
+  // 找所有时段块: "第N节\nHH:MM-HH:MM\n课程数据"
+  const periods: { start: number; span: number; cells: string[] }[] = [];
+  const periodRe = /第(\d+)节\n[\d:]+-[\d:]+\n([\s\S]*?)(?=\n第\d+节\n|\n注|\n课程索引|$)/g;
+  let pm;
+  while ((pm = periodRe.exec(text)) !== null) {
+    const start = parseInt(pm[1]);
+    const cellBlock = pm[2];
+    const cells = cellBlock.split(/(?=\n<b>)/).filter(Boolean);
+    if (cells.length === 0) continue; // 空行(如第2/4/6节)跳过
+    const span = periodSpanMap.get(start) || 1;
+    periods.push({ start, span, cells });
+  }
+
+  for (const p of periods) {
+    for (let col = 0; col < Math.min(weekdays.length, 7); col++) {
+      if (col >= p.cells.length) continue;
+      const bm = p.cells[col].match(/<b>(.+?)<\/b>\n(.+?)\n([^\n<]+)/);
+      if (!bm) continue;
+      const name = bm[1].trim();
+      const teacher = bm[2].trim();
+      const room = bm[3].trim();
+      if (!name || !teacher) continue;
+      const wd = weekdays[col] || 0;
+      if (!wd) continue;
+      const key = `${name}|${wd}|${p.start}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      courses.push({
+        name, teacher, classroom: room, weekday: wd,
+        startPeriod: p.start, periodSpan: p.span,
+        weekStart: 1, weekEnd: 18, weekType: 'all' as const,
+        courseType: 'theory' as const,
+        colorClass: 'bg-course-blue text-white',
+      });
+    }
+  }
+
+  return courses;
+}
+
 function parseScheduleText(text: string) {
-  // 策略1: 优先解析"课程索引"区域（最可靠）
+  // 策略1: 课程索引（如果存在）
   const idxStart = text.indexOf('课程索引');
   if (idxStart >= 0) {
     const indexSection = text.substring(idxStart);
@@ -161,7 +247,13 @@ function parseScheduleText(text: string) {
     if (courses.length > 0) return courses;
   }
 
-  // 策略2: 表格解析（制表符/空格分隔）
+  // 策略2: <b>标记的表格格式（最常见）
+  if (text.includes('<b>')) {
+    const courses = parseBoldTable(text);
+    if (courses.length > 0) return courses;
+  }
+
+  // 策略3: 制表符/空格分隔的表格
   return parseTableSection(text);
 }
 
@@ -268,7 +360,7 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
             return fail(res, 500, 'PDF 解析引擎异常');
           }
         }
-        const text = (data?.text || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ''); // 清洗控制字符
+        const text = (data?.text || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ''); // 清洗JSON不安全字符
         if (!text || text.length < 20) {
           return fail(res, 400, 'PDF 无法识别（可能是扫描件或图片型 PDF）。请尝试：1) 从教务系统导出时选择"文字型 PDF"；2) 切换到「粘贴 HTML」标签，复制课表网页内容直接粘贴解析');
         }
@@ -276,9 +368,9 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
         const courses = parseScheduleText(text);
         logger.business('PDF解析', { pages: data.numpages, textLen: text.length, courses: courses.length, trace_id: req._traceId });
         if (courses.length === 0) {
-          return ok(res, { courses: [], rawText: text.substring(0, 3000), hint: '解析到文本但未识别出课程格式。请尝试切换到「粘贴 HTML」标签' });
+          return ok(res, { courses: [], rawText: sanitize(text).substring(0, 3000), hint: '解析到文本但未识别出课程格式。请尝试切换到「粘贴 HTML」标签' });
         }
-        ok(res, { courses, rawText: text.substring(0, 2000) });
+        ok(res, { courses: sanitizeCourses(courses), rawText: sanitize(text).substring(0, 2000) });
       } catch (err: any) {
         logger.error('PDF解析失败', { error: err.message, trace_id: req._traceId });
         fail(res, 500, '解析失败，请检查文件格式是否正确');
