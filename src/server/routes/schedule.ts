@@ -39,101 +39,133 @@ function parseWeeks(raw: string): { weekStart: number; weekEnd: number; weekType
   return { weekStart: 1, weekEnd: 18, weekType: type || 'all' };
 }
 
-function parseScheduleText(text: string) {
+/** 常见中文姓氏 + 职称，用于识别教师名称 */
+const TEACHER_SUFFIX = '(?:教授|老师|讲师|助教)';
+const COMMON_SURNAMES = '[张李王刘陈孙赵周吴郑冯蒋沈韩杨朱秦许何吕施任姜邹苏潘葛范彭韦马苗花方俞袁柳酆鲍史唐费廉岑薛贺倪汤滕殷罗毕郝邬安常乐于时傅皮下齐康伍余元卜顾孟黄穆萧尹姚邵汪毛禹狄米贝臧计伏成戴谈宋茅熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉钮龚程嵇邢滑裴陆荣翁荀羊於惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸韶郜黎蓟薄印宿白怀蒲邰从索咸籍赖卓蔺屠蒙池乔阴郁胥苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍卻璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公]';
+
+/**
+ * 解析"课程索引"格式：无分隔符的紧凑中文文本
+ * 如: "1高等数学 A张教授教1-201周一 第1-2节"
+ */
+function parseIndexSection(text: string) {
+  const courses: any[] = [];
+  const seen = new Set<string>();
+
+  // 匹配模式: 序号 + 课程名 + 教师 + 教室 + 周X + 时间范围
+  const pattern = new RegExp(
+    `(\\d+)\\s*` +                                      // 序号
+    `(.+?)` +                                            // 课程名（非贪婪）
+    `(${COMMON_SURNAMES})${TEACHER_SUFFIX}` +           // 教师：姓氏+职称
+    `([^周]+?)` +                                        // 教室
+    `周([一二三四五六日])\\s*` +                         // 周几
+    `第(\\d+)[-~至](\\d+)节`,                           // 第N-M节
+    'g'
+  );
+
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    const name = m[2].trim();
+    const teacher = m[3] + m[5]; // m[3] is surname, m[5] would be 教授/老师 — actually m[4] captures the full teacher
+    // Fix: the regex groups are: 1=序号, 2=课程名, 3=姓氏(captured), 4=后缀(captured by TEACHER_SUFFIX), 5=教室, 6=周几, 7=start, 8=end
+    const actualTeacher = m[3] + m[4];
+    const classroom = m[5].trim();
+    const weekday = getWeekday(m[6]);
+    const start = parseInt(m[7]);
+    const end = parseInt(m[8]);
+    if (!weekday || start < 1 || end > 14) continue;
+
+    const key = `${name}|${weekday}|${start}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    courses.push({
+      name,
+      teacher: actualTeacher,
+      classroom,
+      weekday,
+      startPeriod: start,
+      periodSpan: end - start + 1,
+      weekStart: 1,
+      weekEnd: 18,
+      weekType: 'all' as const,
+      courseType: 'theory' as const,
+      colorClass: 'bg-course-blue text-white',
+    });
+  }
+
+  return courses;
+}
+
+/**
+ * 解析 HTML table 中的课表（从 <tr>/<td> 结构）
+ */
+function parseTableSection(text: string) {
   const lines = text.split(/[\r\n]+/).filter(Boolean);
   const courses: any[] = [];
   const seen = new Set<string>();
 
-  // 尝试多种分隔策略
   for (const strategy of [
-    // 策略1: 制表符/Tab 分隔
     (line: string) => line.split('\t').filter(Boolean),
-    // 策略2: 2个以上空格/逗号/竖线分隔
     (line: string) => line.split(/[|,，\s]{2,}/).filter(Boolean),
-    // 策略3: 单个空格分隔 (最后兜底，只取5个以上字段的行)
-    (line: string) => {
-      const parts = line.split(/\s+/).filter(Boolean);
-      return parts.length >= 5 ? parts : [];
-    },
   ]) {
     for (const line of lines) {
       const parts = strategy(line);
       if (parts.length < 3) continue;
 
-      // 尝试定位字段：查找含课程名、教师、时间信息的字段
-      let nameIdx = 0;
-      let weekdayIdx = -1;
-      let timeIdx = -1;
-      let roomIdx = -1;
-
+      let weekdayIdx = -1, timeIdx = -1, roomIdx = -1;
       for (let i = 0; i < parts.length; i++) {
         const p = parts[i];
-        // 周几：含中文数字一~日
-        if (weekdayIdx < 0 && /[一二三四五六日]/.test(p) && p.length <= 6) {
-          weekdayIdx = i;
-        }
-        // 节次：含数字-数字
-        if (timeIdx < 0 && /\d{1,2}\s*[-~至到]\s*\d{1,2}/.test(p)) {
-          timeIdx = i;
-        }
-        // 教室：含字母+数字
-        if (roomIdx < 0 && /[A-Za-z]\d/.test(p)) {
-          roomIdx = i;
-        }
+        if (weekdayIdx < 0 && /[一二三四五六日]/.test(p) && p.length <= 6) weekdayIdx = i;
+        if (timeIdx < 0 && /\d{1,2}\s*[-~至到]\s*\d{1,2}/.test(p)) timeIdx = i;
+        if (roomIdx < 0 && /[A-Za-z]\d/.test(p)) roomIdx = i;
       }
-
-      // 如果没找到时间信息，跳过
       if (timeIdx < 0) continue;
 
-      // 课程名在 weekday 之前
-      if (weekdayIdx >= 0) nameIdx = weekdayIdx - 1;
-      if (nameIdx < 0) nameIdx = 0;
-
+      const nameIdx = weekdayIdx >= 0 ? weekdayIdx - 1 : 0;
+      if (nameIdx < 0) continue;
       const name = parts[nameIdx]?.trim();
-      const weekdayStr = weekdayIdx >= 0 ? parts[weekdayIdx].trim() : '';
-      const weekday = getWeekday(weekdayStr);
-      if (!weekday || weekday > 7 || !name) continue;
-
+      const weekday = getWeekday(weekdayIdx >= 0 ? parts[weekdayIdx].trim() : '');
+      if (!weekday || !name) continue;
       const timeInfo = parseTimeRange(parts[timeIdx].trim());
       if (!timeInfo) continue;
 
-      // 教师：名字含2-3个中文字且不在已定位位置
       let teacher = '';
       for (let i = 0; i < parts.length; i++) {
         if (i !== nameIdx && i !== weekdayIdx && i !== timeIdx && i !== roomIdx) {
           const t = parts[i].trim();
-          if (/^[\u4e00-\u9fff]{2,4}$/.test(t) && !/\d/.test(t)) {
-            teacher = t;
-            break;
-          }
+          if (/^[\u4e00-\u9fff]{2,4}$/.test(t) && !/\d/.test(t)) { teacher = t; break; }
         }
       }
-
       const classroom = roomIdx >= 0 ? parts[roomIdx].trim() : '';
-      const weeks = parseWeeks(parts[parts.length - 1] || '');
       const key = `${name}|${weekday}|${timeInfo.start}|${classroom}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
       courses.push({
-        name,
-        teacher,
-        classroom,
-        weekday,
+        name, teacher, classroom, weekday,
         startPeriod: timeInfo.start,
         periodSpan: timeInfo.span,
-        weekStart: weeks.weekStart,
-        weekEnd: weeks.weekEnd,
-        weekType: weeks.weekType,
+        weekStart: 1, weekEnd: 18, weekType: 'all' as const,
         courseType: 'theory' as const,
         colorClass: 'bg-course-blue text-white',
       });
     }
+    if (courses.length > 0) break;
+  }
+  return courses;
+}
 
-    if (courses.length > 0) break; // 找到课程就不再尝试后续策略
+function parseScheduleText(text: string) {
+  // 策略1: 优先解析"课程索引"区域（最可靠）
+  const idxStart = text.indexOf('课程索引');
+  if (idxStart >= 0) {
+    const indexSection = text.substring(idxStart);
+    const courses = parseIndexSection(indexSection);
+    if (courses.length > 0) return courses;
   }
 
-  return courses;
+  // 策略2: 表格解析（制表符/空格分隔）
+  return parseTableSection(text);
 }
 
 function parseHtmlTable(html: string) {
@@ -174,15 +206,10 @@ function parseHtmlTable(html: string) {
         seen.add(key);
 
         courses.push({
-          name,
-          teacher,
-          classroom,
-          weekday,
+          name, teacher, classroom, weekday,
           startPeriod: timeInfo.start,
           periodSpan: timeInfo.span,
-          weekStart: 1,
-          weekEnd: 18,
-          weekType: 'all' as const,
+          weekStart: 1, weekEnd: 18, weekType: 'all' as const,
           courseType: 'theory' as const,
           colorClass: 'bg-course-blue text-white',
         });
@@ -205,9 +232,7 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
       if (!req.file) return fail(res, 400, '请上传学生证图片');
       const filePath = (req.file as any).path;
       try {
-        // 基础版：返回中等置信度，用户自行核对填写。后续可接 Tesseract/云 OCR 增强。
         ok(res, { name: '', studentId: '', department: '', confidence: 'medium' });
-        // 异步清理临时文件
         if (filePath) {
           setTimeout(() => {
             try { fs.unlinkSync(filePath); } catch {}
@@ -231,7 +256,6 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
     async (req: Request, res: Response) => {
       if (!req.file) return fail(res, 400, '请上传 PDF 文件');
       const ext = (req.file.originalname || '').toLowerCase().split('.').pop();
-      // 放宽 MIME 校验：部分浏览器/系统对 PDF 上报 application/octet-stream
       const validExt = ext === 'pdf';
       const validMime = req.file.mimetype === 'application/pdf' || req.file.mimetype === 'application/octet-stream';
       if (!validExt || !validMime) {
@@ -239,13 +263,15 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
       }
 
       try {
-        const mod = await import('pdf-parse');
-        const PDFParse = mod.default || mod.PDFParse || mod;
+        const pdfParse = require('pdf-parse');
+        const parseFn = typeof pdfParse === 'function' ? pdfParse : (pdfParse.default || pdfParse);
         let data: any;
-        try { data = await PDFParse(req.file.buffer); } catch {
-          data = await new (PDFParse as any)(req.file.buffer);
+        try { data = await parseFn(req.file.buffer); } catch {
+          try { data = await new (parseFn as any)(req.file.buffer); } catch {
+            return fail(res, 500, 'PDF 解析引擎异常');
+          }
         }
-        const text = data.text;
+        const text = data?.text || '';
         if (!text || text.length < 20) {
           return fail(res, 400, 'PDF 无法识别（可能是扫描件或图片型 PDF）。请尝试：1) 从教务系统导出时选择"文字型 PDF"；2) 切换到「粘贴 HTML」标签，复制课表网页内容直接粘贴解析');
         }
@@ -253,7 +279,7 @@ export function registerScheduleRoutes(app: any, pdfUpload: any, imageUpload: an
         const courses = parseScheduleText(text);
         logger.business('PDF解析', { pages: data.numpages, textLen: text.length, courses: courses.length, trace_id: req._traceId });
         if (courses.length === 0) {
-          return ok(res, { courses: [], rawText: text.substring(0, 3000), hint: '解析到文本但未识别出课程。请检查文本格式，或切换到「粘贴 HTML」标签' });
+          return ok(res, { courses: [], rawText: text.substring(0, 3000), hint: '解析到文本但未识别出课程格式。请尝试切换到「粘贴 HTML」标签' });
         }
         ok(res, { courses, rawText: text.substring(0, 2000) });
       } catch (err: any) {
