@@ -89,7 +89,8 @@ export default function App() {
   }, [dm, d]);
 
   const handleViewProfile = useCallback((userId: number, placeholder: any, onStartChat?: (userId: number) => void) => {
-    // 查看自己的主页时不显示“发私信”
+    if (!userId || userId <= 0) return; // 发布者 ID 无效，不打开主页
+    // 查看自己的主页时不显示”发私信”
     setProfileView({ userId, placeholder, onStartChat: userId === dm.currentUserId ? undefined : onStartChat });
   }, [dm.currentUserId]);
 
