@@ -225,12 +225,17 @@ export function useDirectMessages() {
 
   // ── 从 ProfilePage 发起聊天 ──
   const startChat = useCallback(async (targetUserId: number) => {
+    if (!targetUserId || targetUserId <= 0) {
+      return { code: -1, message: '用户信息异常，无法发起私信', data: null };
+    }
+    // debug: 线上排查 currentUserId 是否为 0
+    if (!currentUserId) console.warn('[DM] currentUserId is 0, JWT uid may be missing', { tokenVal: !!getToken() });
     const res = await dmApi.findOrCreate(targetUserId);
     if (res.code === 0 && res.data) {
       openChat(res.data.id, res.data.otherUser);
     }
     return res; // 返回完整响应，上层可展示真实错误信息
-  }, [openChat]);
+  }, [openChat, currentUserId]);
 
   return {
     conversations,
