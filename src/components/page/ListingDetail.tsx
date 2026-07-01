@@ -210,7 +210,7 @@ export default function ListingDetail({
       <section className="p-4 bg-white flex flex-col gap-4">
         <div
           className="flex items-center justify-between"
-          onClick={() => onViewProfile?.(listing.publisherId, {
+          onClick={listing.publisherId > 0 ? () => onViewProfile?.(listing.publisherId, {
             name: listing.publisherName,
             avatar: listing.publisherAvatar,
             isVerified: listing.isVerifiedStudent,
@@ -218,9 +218,9 @@ export default function ListingDetail({
             orgLevel: listing.publisherOrgLevel,
             orgName: listing.orgName,
             position: listing.publisherPosition,
-          })}
+          }) : undefined}
         >
-          <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer touch-manipulation select-none">
+          <div className={`flex items-center gap-3 flex-1 min-w-0 touch-manipulation select-none ${listing.publisherId > 0 ? 'cursor-pointer' : ''}`}>
             <img
               src={listing.publisherAvatar}
               alt={listing.publisherName}
