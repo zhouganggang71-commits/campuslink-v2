@@ -81,9 +81,17 @@ export default function App() {
     d.setSelectedListing(null);
   }, [d.setActiveTab, d.setSelectedListing]);
 
+  // 发起私信 + 失败时展示服务端真实错误（不能和自己聊天 / 目标用户ID无效 等）
+  const startChatWithToast = useCallback((uid: number) => {
+    dm.startChat(uid).then((res) => {
+      if (res.code !== 0) d.showToast(res.message || '发起私信失败', 'info');
+    });
+  }, [dm, d]);
+
   const handleViewProfile = useCallback((userId: number, placeholder: any, onStartChat?: (userId: number) => void) => {
-    setProfileView({ userId, placeholder, onStartChat });
-  }, []);
+    // 查看自己的主页时不显示“发私信”
+    setProfileView({ userId, placeholder, onStartChat: userId === dm.currentUserId ? undefined : onStartChat });
+  }, [dm.currentUserId]);
 
   // Tab 懒加载：首次切换到某 Tab 才挂载，之后用 display:none 保活
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(new Set(['home']));
@@ -127,17 +135,9 @@ export default function App() {
             }}
             onDelete={a.handleDelete}
             isGuest={d.isGuest}
-            onStartChat={(userId) => {
-              dm.startChat(userId).then((ok) => {
-                if (!ok) d.showToast('发起私信失败', 'info');
-              });
-            }}
+            onStartChat={startChatWithToast}
             onViewProfile={(userId, placeholder) => {
-              handleViewProfile(userId, placeholder, (uid) => {
-                dm.startChat(uid).then((ok) => {
-                  if (!ok) d.showToast('发起私信失败', 'info');
-                });
-              });
+              handleViewProfile(userId, placeholder, startChatWithToast);
             }}
           />
         ) : (
@@ -161,11 +161,7 @@ export default function App() {
                 listError={d.listError}
                 onRetry={d.refreshPosts}
                 onViewProfile={(userId, placeholder) => {
-                  handleViewProfile(userId, placeholder, (uid) => {
-                    dm.startChat(uid).then((ok) => {
-                      if (!ok) d.showToast('发起私信失败', 'info');
-                    });
-                  });
+                  handleViewProfile(userId, placeholder, startChatWithToast);
                 }}
               />
             </div>
@@ -230,11 +226,7 @@ export default function App() {
                 isGuest={d.isGuest}
                 onAuth={() => d.setIsAuthModalOpen(true)}
                 onViewProfile={(userId, placeholder) => {
-                  handleViewProfile(userId, placeholder, (uid) => {
-                    dm.startChat(uid).then((ok) => {
-                      if (!ok) d.showToast('发起私信失败', 'info');
-                    });
-                  });
+                  handleViewProfile(userId, placeholder, startChatWithToast);
                 }}
               />
             </div>

@@ -24,17 +24,17 @@ export function useDirectMessages() {
 
   const dmUnreadCount = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
-  // 从 JWT 解析当前用户数据库 ID
+  // 从 JWT 解析当前用户数据库 ID（依赖 token，登录后会重算，避免游客→登录残留 0）
+  const tokenVal = getToken();
   const currentUserId = useMemo(() => {
     try {
-      const token = getToken();
-      if (!token) return 0;
-      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (!tokenVal) return 0;
+      const payload = JSON.parse(atob(tokenVal.split('.')[1]));
       return payload?.uid || 0;
     } catch {
       return 0;
     }
-  }, []);
+  }, [tokenVal]);
 
   // ── 加载会话列表 ──
   const loadConversations = useCallback(() => {
@@ -225,16 +225,11 @@ export function useDirectMessages() {
 
   // ── 从 ProfilePage 发起聊天 ──
   const startChat = useCallback(async (targetUserId: number) => {
-    try {
-      const res = await dmApi.findOrCreate(targetUserId);
-      if (res.code === 0 && res.data) {
-        const conv = res.data;
-        openChat(conv.id, conv.otherUser);
-      }
-      return res.code === 0;
-    } catch {
-      return false;
+    const res = await dmApi.findOrCreate(targetUserId);
+    if (res.code === 0 && res.data) {
+      openChat(res.data.id, res.data.otherUser);
     }
+    return res; // 返回完整响应，上层可展示真实错误信息
   }, [openChat]);
 
   return {
