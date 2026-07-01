@@ -1,3 +1,5 @@
+> **开工前必读**：先读 `/Users/zhenggangzhou/Desktop/memory_backup/记忆库精简版.md`（果果的全局记忆：身份/团队/服务器/密钥/项目/规则），再动手。
+
 # CampusLink — 四川财经职业学院校园信息平台
 
 ## 核心原则

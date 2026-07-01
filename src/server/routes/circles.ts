@@ -66,6 +66,7 @@ export function registerCircleRoutes(app: any, pool: any) {
 
       const [rows]: any = await pool.query(
         `SELECT cp.id, cp.circle_id, cp.content,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
                 COALESCE(cp.images, '[]') as images,
                 COALESCE(cp.tags, '[]') as tags,
                 cp.is_anonymous, cp.like_count, cp.comment_count, cp.created_at,
@@ -111,7 +112,9 @@ export function registerCircleRoutes(app: any, pool: any) {
       const total = countRows[0].total;
 
       const [rows]: any = await pool.query(
-        `SELECT cp.id, cp.circle_id, cp.content, cp.images, cp.tags, cp.is_anonymous,
+        `SELECT cp.id, cp.circle_id, cp.content,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
+                cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
                 u.nickname, u.auth_status, u.is_admin
          FROM circle_posts cp
@@ -185,7 +188,9 @@ export function registerCircleRoutes(app: any, pool: any) {
       });
 
       const [newPost]: any = await pool.query(
-        `SELECT cp.id, cp.circle_id, cp.content, cp.images, cp.tags, cp.is_anonymous,
+        `SELECT cp.id, cp.circle_id, cp.content,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
+                cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
                 u.nickname, u.auth_status, u.is_admin
          FROM circle_posts cp JOIN users u ON cp.user_id = u.id WHERE cp.id = ?`,
@@ -367,7 +372,9 @@ export function registerCircleRoutes(app: any, pool: any) {
     try {
       const userId = (req as any).userId;
       const [rows]: any = await pool.query(
-        `SELECT cp.id, cp.circle_id, cp.content, cp.images, cp.tags, cp.is_anonymous,
+        `SELECT cp.id, cp.circle_id, cp.content,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
+                cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
                 u.nickname, u.auth_status, u.is_admin
          FROM circle_favorites cf

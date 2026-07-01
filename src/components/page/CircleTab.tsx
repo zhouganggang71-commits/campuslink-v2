@@ -266,6 +266,7 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
                 onSave={handleSave}
                 onDetail={() => setDetailPost(post)}
                 isSaved={savedIds.has(post.id)}
+                onViewProfile={onViewProfile}
               />
             ))}
             <Pagination page={page} totalPages={totalPages} onPage={goToPage} />

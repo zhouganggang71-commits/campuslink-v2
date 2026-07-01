@@ -12,6 +12,7 @@ interface CircleCardProps {
   onSave: (postId: number) => void;
   onDetail: (post: CirclePost) => void;
   isSaved: boolean;
+  onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
 const CIRCLE_LABELS: Record<string, string> = {
@@ -19,9 +20,10 @@ const CIRCLE_LABELS: Record<string, string> = {
   hobby: '兴趣社团', treehole: '匿名树洞', career: '毕业就业',
 };
 
-function CircleCardInner({ post, onLike, onSave, onDetail, isSaved }: CircleCardProps) {
+function CircleCardInner({ post, onLike, onSave, onDetail, isSaved, onViewProfile }: CircleCardProps) {
   const displayName = post.is_anonymous ? '匿名同学' : (post.nickname || '同学');
   const showVerified = !post.is_anonymous && post.auth_status === 'verified';
+  const canViewProfile = !post.is_anonymous && !!onViewProfile && (post.user_id || 0) > 0;
   const images = Array.isArray(post.images) ? post.images : [];
   const tags = Array.isArray(post.tags) ? post.tags : [];
 
@@ -32,17 +34,29 @@ function CircleCardInner({ post, onLike, onSave, onDetail, isSaved }: CircleCard
     >
       {/* 用户信息行 */}
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-gray-400 shrink-0">
-          <Icon name="person" className="text-sm" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-on-surface">{displayName}</span>
-            {showVerified && (
-              <Icon name="verified" className="text-[10px] text-course-green" />
-            )}
+        <div
+          className={`flex items-center gap-2 flex-1 min-w-0 ${canViewProfile ? 'cursor-pointer' : ''}`}
+          onClick={canViewProfile ? (e) => {
+            e.stopPropagation();
+            onViewProfile!(post.user_id || 0, {
+              name: post.nickname || '',
+              avatar: '',
+              isVerified: post.auth_status === 'verified',
+            });
+          } : undefined}
+        >
+          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-gray-400 shrink-0">
+            <Icon name="person" className="text-sm" />
           </div>
-          <span className="text-[10px] text-gray-400">{timeAgo(post.created_at)}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-on-surface">{displayName}</span>
+              {showVerified && (
+                <Icon name="verified" className="text-[10px] text-course-green" />
+              )}
+            </div>
+            <span className="text-[10px] text-gray-400">{timeAgo(post.created_at)}</span>
+          </div>
         </div>
         {post.is_anonymous ? (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-gray-400 shrink-0">匿名</span>
