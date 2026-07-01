@@ -84,7 +84,11 @@ export default function App() {
   // 发起私信 + 失败时展示服务端真实错误（不能和自己聊天 / 目标用户ID无效 等）
   const startChatWithToast = useCallback((uid: number) => {
     dm.startChat(uid).then((res) => {
-      if (res.code !== 0) d.showToast(res.message || '发起私信失败', 'info');
+      if (res.code === 0) {
+        setProfileView(null); // 成功后关掉个人主页覆盖层，露出聊天页（两者同为 z-50，否则会被盖住）
+      } else {
+        d.showToast(res.message || '发起私信失败', 'info');
+      }
     });
   }, [dm, d]);
 
