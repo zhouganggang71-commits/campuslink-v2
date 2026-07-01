@@ -8,9 +8,9 @@ interface BottomNavProps {
 
 const TABS = [
   { key: 'home', icon: 'home', label: '首页' },
-  { key: 'schedule', icon: 'calendar_month', label: '课表' },
-  { key: 'publish', icon: 'add_circle', label: '发布', special: true },
   { key: 'circles', icon: 'group', label: '校园圈' },
+  { key: 'publish', icon: 'add_circle', label: '发布', special: true },
+  { key: 'schedule', icon: 'calendar_month', label: '课表' },
   { key: 'messages', icon: 'chat', label: '消息' },
 ];
 
