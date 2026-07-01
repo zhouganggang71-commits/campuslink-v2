@@ -265,7 +265,7 @@ export default function HomeTab({
                 postTypeLabel={postTypeLabel}
                 onClick={() => openListingDetails(item)}
                 isSaved={savedListingIds.includes(String(item.id))}
-                onViewProfile={onViewProfile && item.publisherId > 0 ? () => onViewProfile(item.publisherId, {
+                onViewProfile={onViewProfile ? () => onViewProfile(item.publisherId, {
                   name: item.publisherName,
                   avatar: item.publisherAvatar,
                   isVerified: item.isVerifiedStudent,
