@@ -38,9 +38,13 @@ ssh "$N100" "
     npm install --production
     cp package-lock.json node_modules/.package-lock.sha
     echo '  依赖已更新'
+    # 依赖变更时重新安装 Playwright 浏览器
+    npx playwright install chromium 2>&1 || echo '  Playwright 浏览器安装跳过（非关键）'
   else
     echo '  依赖未变化，跳过'
   fi
+  # 每次部署都确保系统依赖存在
+  npx playwright install-deps chromium 2>/dev/null || true
 "
 
 # ── 4/6 备份数据库（加密） ──

@@ -3,7 +3,6 @@ import { Listing } from '../../types';
 import Icon from '../ui/Icon';
 
 const RegisterPanel = lazy(() => import('./RegisterPanel'));
-const ProfilePage = lazy(() => import('./ProfilePage'));
 
 const REPORT_REASONS = ['虚假信息', '诈骗钓鱼', '色情低俗', '违禁品', '人身攻击', '其他违规'];
 
@@ -20,6 +19,8 @@ interface ListingDetailProps {
   onDelete: (id: string) => void;
   currentProfile?: { fullName: string; studentId: string; department: string };
   isGuest?: boolean;
+  onStartChat?: (userId: number) => void;
+  onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
 export default function ListingDetail({
@@ -35,11 +36,12 @@ export default function ListingDetail({
   onDelete,
   currentProfile,
   isGuest,
+  onStartChat,
+  onViewProfile,
 }: ListingDetailProps) {
   const isSaved = savedListingIds.includes(listing.id);
   const isReal = /^\d+$/.test(listing.id); // 真实帖子 ID 为纯数字，mock 数据 ID 如 headphones-1 非数字
   const [isReportOpen, setIsReportOpen] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const isOwn = listing.publisherName === currentUserName;
 
   // ── 手势滑动 ──
@@ -71,26 +73,6 @@ export default function ListingDetail({
     }
     setSwipeDelta(0);
   }, [swipeDelta, carouselIndex, setCarouselIndex, listing.imageUrls.length]);
-
-  if (showProfile) {
-    return (
-      <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
-        <ProfilePage
-          userId={listing.publisherId}
-          onBack={() => setShowProfile(false)}
-          placeholder={{
-            name: listing.publisherName,
-            avatar: listing.publisherAvatar,
-            isVerified: listing.isVerifiedStudent,
-            department: listing.department,
-            orgLevel: listing.publisherOrgLevel,
-            orgName: listing.orgName,
-            position: listing.publisherPosition,
-          }}
-        />
-      </Suspense>
-    );
-  }
 
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
@@ -228,7 +210,15 @@ export default function ListingDetail({
       <section className="p-4 bg-white flex flex-col gap-4">
         <div
           className="flex items-center justify-between"
-          onClick={() => setShowProfile(true)}
+          onClick={() => onViewProfile?.(listing.publisherId, {
+            name: listing.publisherName,
+            avatar: listing.publisherAvatar,
+            isVerified: listing.isVerifiedStudent,
+            department: listing.department,
+            orgLevel: listing.publisherOrgLevel,
+            orgName: listing.orgName,
+            position: listing.publisherPosition,
+          })}
         >
           <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer touch-manipulation select-none">
             <img

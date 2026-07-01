@@ -127,3 +127,24 @@ export interface Registration {
   phone: string;
   registeredAt: string;
 }
+
+export interface Conversation {
+  id: number;
+  otherUser: {
+    id: number;
+    nickname: string;
+    avatarUrl: string;
+  };
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  content: string;
+  isRead: boolean;
+  createdAt: string;
+}

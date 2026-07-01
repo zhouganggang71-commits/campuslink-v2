@@ -11,9 +11,11 @@ interface PostCardProps {
   postTypeLabel: (pt: string) => string;
   onClick: () => void;
   isSaved?: boolean;
+  /** 点击发帖人头像/名字 → 打开个人主页；不传则名字不可点 */
+  onViewProfile?: () => void;
 }
 
-function PostCardInner({ listing, postTypeLabel, onClick, isSaved }: PostCardProps) {
+function PostCardInner({ listing, postTypeLabel, onClick, isSaved, onViewProfile }: PostCardProps) {
   const hasImage = listing.imageUrls && listing.imageUrls.length > 0 && listing.imageUrls[0];
   return (
     <div
@@ -49,7 +51,27 @@ function PostCardInner({ listing, postTypeLabel, onClick, isSaved }: PostCardPro
         </h3>
         <p className="text-xs text-on-surface-variant mt-1 line-clamp-2 leading-relaxed">{listing.description}</p>
         <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-400 flex-wrap">
-          <span>{listing.publisherName}</span>
+          {onViewProfile ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onViewProfile(); }}
+              className="flex items-center gap-1 max-w-[45%] min-w-0 hover:text-primary transition-colors"
+            >
+              {listing.publisherAvatar ? (
+                <img
+                  src={listing.publisherAvatar}
+                  alt=""
+                  className="w-4 h-4 rounded-full object-cover shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <Icon name="person" className="text-[11px] shrink-0" />
+              )}
+              <span className="truncate">{listing.publisherName}</span>
+            </button>
+          ) : (
+            <span>{listing.publisherName}</span>
+          )}
           <span>{timeAgo(listing.publishedTimeText)}</span>
           <span className="flex items-center gap-0.5">
             <Icon name="visibility" className="text-[11px]" />

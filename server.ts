@@ -17,6 +17,7 @@ import { ok, fail } from "./src/server/response";
 import { limiter } from "./src/server/middleware/limiter";
 import { apiSpec } from "./src/server/api-spec";
 import { registerAuthRoutes } from "./src/server/routes/auth";
+import { registerWechatAuthRoutes } from "./src/server/routes/auth-wechat";
 import { registerPostRoutes } from "./src/server/routes/posts";
 import { registerCourseRoutes } from "./src/server/routes/courses";
 import { registerUploadRoutes } from "./src/server/routes/upload";
@@ -26,6 +27,7 @@ import { registerRegistrationRoutes } from "./src/server/routes/registrations";
 import { registerFeedbackRoutes } from "./src/server/routes/feedback";
 import { registerCircleRoutes } from "./src/server/routes/circles";
 import { registerNoticeRoutes } from "./src/server/routes/notices";
+import { registerMessageRoutes } from "./src/server/routes/messages";
 
 // ── 全局错误处理 ──
 installGlobalHandlers();
@@ -268,6 +270,7 @@ function safeRegister(name: string, fn: () => void) {
 }
 
 safeRegister("auth",       () => registerAuthRoutes(app, pool));
+safeRegister("auth-wechat", () => registerWechatAuthRoutes(app, pool));
 safeRegister("posts",      () => registerPostRoutes(app, pool));
 safeRegister("courses",    () => registerCourseRoutes(app, pool));
 safeRegister("upload",     () => registerUploadRoutes(app, imageUpload));
@@ -277,6 +280,7 @@ safeRegister("registrations", () => registerRegistrationRoutes(app, pool));
 safeRegister("feedback",      () => registerFeedbackRoutes(app, pool));
 safeRegister("circles",       () => registerCircleRoutes(app, pool));
 safeRegister("notices",       () => registerNoticeRoutes(app, pool));
+safeRegister("messages",      () => registerMessageRoutes(app, pool));
 
 // ── 全局错误处理 ──
 app.use((err: any, req: any, res: any, next: any) => {

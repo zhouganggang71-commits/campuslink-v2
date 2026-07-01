@@ -28,6 +28,7 @@ interface HomeTabProps {
   loading: boolean;
   listError?: string | null;
   onRetry?: () => void;
+  onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
 export default function HomeTab({
@@ -47,6 +48,7 @@ export default function HomeTab({
   loading,
   listError,
   onRetry,
+  onViewProfile,
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
   const [showMine, setShowMine] = useState(false);
@@ -263,6 +265,15 @@ export default function HomeTab({
                 postTypeLabel={postTypeLabel}
                 onClick={() => openListingDetails(item)}
                 isSaved={savedListingIds.includes(String(item.id))}
+                onViewProfile={onViewProfile ? () => onViewProfile(item.publisherId, {
+                  name: item.publisherName,
+                  avatar: item.publisherAvatar,
+                  isVerified: item.isVerifiedStudent,
+                  department: item.department,
+                  orgLevel: item.publisherOrgLevel,
+                  orgName: item.orgName,
+                  position: item.publisherPosition,
+                }) : undefined}
               />
             ))}
           </div>

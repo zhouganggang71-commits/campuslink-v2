@@ -10,7 +10,7 @@ const TABS = [
   { key: 'home', icon: 'home', label: '首页' },
   { key: 'schedule', icon: 'calendar_month', label: '课表' },
   { key: 'publish', icon: 'add_circle', label: '发布', special: true },
-  { key: 'circles', icon: 'group', label: '校园圈' },
+  { key: 'messages', icon: 'chat', label: '消息' },
   { key: 'profile', icon: 'person', label: '我的' },
 ];
 
@@ -19,7 +19,7 @@ export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSel
     <nav className="fixed bottom-0 left-0 w-full z-40 bg-white border-t border-gray-100 shadow-[0px_-4px_12px_rgba(0,0,0,0.05)] py-2 pb-safe flex justify-around items-center max-w-lg mx-auto right-0">
       {TABS.map((item) => {
         const isSelected = activeTab === item.key;
-        const badge = item.key === 'profile' ? unreadCount : 0;
+        const badge = item.key === 'messages' ? unreadCount : 0;
         return (
           <button
             key={item.key}

@@ -8,5 +8,6 @@ export { coursesApi } from './courses';
 export { circlesApi } from './circles';
 export { uploadApi } from './upload';
 export { noticesApi } from './notices';
+export { dmApi } from './messages';
 export { request, setSession, getToken } from './client';
 export type { ApiResponse } from './client';

@@ -20,6 +20,7 @@ interface CircleTabProps {
   showToast: (msg: string, type?: 'success' | 'info') => void;
   isGuest: boolean;
   onAuth: () => void;
+  onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
 const CIRCLE_ICONS: Record<string, string> = {
@@ -37,7 +38,7 @@ function saveSaved(ids: Set<number>) {
   try { localStorage.setItem('campuslink_circle_saved', JSON.stringify([...ids])); } catch {}
 }
 
-export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps) {
+export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }: CircleTabProps) {
   const {
     circles, activeCircle,
     posts, loading, page, totalPages, goToPage,
@@ -133,6 +134,7 @@ export default function CircleTab({ showToast, isGuest, onAuth }: CircleTabProps
         onSave={handleSave}
         isSaved={savedIds.has(detailPost.id)}
         showToast={showToast}
+        onViewProfile={onViewProfile}
       />
     );
   }

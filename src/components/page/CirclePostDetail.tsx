@@ -1,12 +1,10 @@
-import { useEffect, useState, useCallback, lazy, Suspense, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
 import { getToken } from '../../utils/api';
 import { circlesApi, uploadApi } from '../../api';
 import { timeAgo } from '../../utils/time';
 import type { CirclePost } from '../../hooks/useCircles';
-
-const ProfilePage = lazy(() => import('./ProfilePage'));
 
 interface CommentItem {
   id: number;
@@ -27,16 +25,16 @@ interface CirclePostDetailProps {
   onSave: (postId: number) => void;
   isSaved: boolean;
   showToast: (msg: string, type?: 'success' | 'info') => void;
+  onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
-export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved, showToast }: CirclePostDetailProps) {
+export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved, showToast, onViewProfile }: CirclePostDetailProps) {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: number; name: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localLikeCount, setLocalLikeCount] = useState(post.like_count);
-  const [showProfile, setShowProfile] = useState(false);
   const [commentImage, setCommentImage] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +124,10 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
       } else {
         showToast(res.message || '上传失败');
       }
-    } catch { showToast('上传失败'); }
+    } catch (e: any) {
+      console.error('[upload image]', e);
+      showToast(e?.message || '上传失败');
+    }
     setImageUploading(false);
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
@@ -151,7 +152,15 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
         {/* 用户信息 */}
         <div
           className={`px-4 py-3 flex items-center gap-3 ${!post.is_anonymous ? 'cursor-pointer touch-manipulation select-none' : ''}`}
-          onClick={() => { if (!post.is_anonymous) setShowProfile(true); }}
+          onClick={() => {
+            if (!post.is_anonymous && onViewProfile) {
+              onViewProfile(post.user_id || 0, {
+                name: post.nickname || '',
+                avatar: '',
+                isVerified: post.auth_status === 'verified',
+              });
+            }
+          }}
         >
           <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
             <Icon name="person" className="text-lg text-gray-400" />
@@ -278,21 +287,6 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
           )}
         </div>
       </div>
-
-      {/* 个人主页 */}
-      {showProfile && (
-        <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
-          <ProfilePage
-            userId={post.user_id || 0}
-            onBack={() => setShowProfile(false)}
-            placeholder={{
-              name: post.nickname || '',
-              avatar: '',
-              isVerified: post.auth_status === 'verified',
-            }}
-          />
-        </Suspense>
-      )}
 
       {/* 评论输入 */}
       <div className="border-t border-gray-100 px-4 py-3 bg-white">

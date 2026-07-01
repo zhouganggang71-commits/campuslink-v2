@@ -17,6 +17,7 @@ interface ProfilePageProps {
     orgName?: string;
     position?: string;
   };
+  onStartChat?: (userId: number) => void;
 }
 
 interface UserPublicProfile {
@@ -42,7 +43,7 @@ const COVER_GRADIENTS = [
   'from-rose-400 via-red-500 to-orange-500',
 ];
 
-export default function ProfilePage({ userId, onBack, placeholder }: ProfilePageProps) {
+export default function ProfilePage({ userId, onBack, placeholder, onStartChat }: ProfilePageProps) {
   const [profile, setProfile] = useState<UserPublicProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [posts, setPosts] = useState<Listing[]>([]);
@@ -206,6 +207,16 @@ export default function ProfilePage({ userId, onBack, placeholder }: ProfilePage
             </div>
           )}
         </div>
+
+        {/* 发私信按钮 */}
+        {onStartChat && (
+          <button
+            onClick={() => onStartChat(userId)}
+            className="mt-4 px-6 py-2 bg-[#576b95] text-white text-sm font-semibold rounded-full active:scale-95 transition-transform"
+          >
+            发私信
+          </button>
+        )}
       </div>
 
       {/* ── Tab + 内容 ── */}
