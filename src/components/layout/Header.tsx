@@ -4,15 +4,16 @@ import { useTheme } from '../../utils/theme';
 interface HeaderProps {
   selectedListing: boolean;
   activeTab: string;
-  unreadCount: number;
   onClearListing: () => void;
-  onMessagesClick: () => void;
+  onProfileClick: () => void;
+  avatarUrl?: string;
 }
 
 const TAB_LABELS: Record<string, string> = {
   home: '校园广场',
   schedule: '课表',
   publish: '发布',
+  circles: '校园圈',
   messages: '消息',
   profile: '我的',
 };
@@ -20,9 +21,9 @@ const TAB_LABELS: Record<string, string> = {
 export default memo(function Header({
   selectedListing,
   activeTab,
-  unreadCount,
   onClearListing,
-  onMessagesClick,
+  onProfileClick,
+  avatarUrl,
 }: HeaderProps) {
   const { theme, toggle } = useTheme();
   return (
@@ -49,23 +50,26 @@ export default memo(function Header({
       </div>
       <div className="flex items-center gap-1 pr-2">
         <button
-          onClick={onMessagesClick}
-          aria-label="消息通知"
-          className="text-gray-500 hover:bg-gray-100 transition-colors p-2 rounded-full active:scale-95 relative cursor-pointer"
-        >
-          <Icon name="notifications" className="text-lg" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 ring-2 ring-white">
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </span>
-          )}
-        </button>
-        <button
           onClick={toggle}
           aria-label="切换主题"
           className="text-gray-500 hover:bg-gray-100 transition-colors p-2 rounded-full active:scale-95 cursor-pointer"
         >
           <Icon name={theme === 'dark' ? 'sunny' : 'dark_mode'} className="text-lg" />
+        </button>
+        <button
+          onClick={onProfileClick}
+          aria-label="我的"
+          className={`p-0.5 rounded-full active:scale-95 cursor-pointer ring-1 transition-all ${
+            activeTab === 'profile' ? 'ring-primary' : 'ring-gray-200 hover:ring-primary/40'
+          }`}
+        >
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <span className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-gray-400">
+              <Icon name="person" className="text-base" />
+            </span>
+          )}
         </button>
       </div>
     </header>

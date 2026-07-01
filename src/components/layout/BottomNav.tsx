@@ -10,8 +10,8 @@ const TABS = [
   { key: 'home', icon: 'home', label: '首页' },
   { key: 'schedule', icon: 'calendar_month', label: '课表' },
   { key: 'publish', icon: 'add_circle', label: '发布', special: true },
+  { key: 'circles', icon: 'group', label: '校园圈' },
   { key: 'messages', icon: 'chat', label: '消息' },
-  { key: 'profile', icon: 'person', label: '我的' },
 ];
 
 export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSelectedListing }: BottomNavProps) {

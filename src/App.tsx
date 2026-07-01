@@ -76,8 +76,8 @@ export default function App() {
   }, [d]);
 
   const clearListing = useCallback(() => d.setSelectedListing(null), [d.setSelectedListing]);
-  const handleMessagesClick = useCallback(() => {
-    d.setActiveTab('messages');
+  const handleProfileClick = useCallback(() => {
+    d.setActiveTab('profile');
     d.setSelectedListing(null);
   }, [d.setActiveTab, d.setSelectedListing]);
 
@@ -102,9 +102,9 @@ export default function App() {
       <Header
         selectedListing={!!d.selectedListing}
         activeTab={d.activeTab}
-        unreadCount={d.unreadCount + dm.dmUnreadCount}
         onClearListing={clearListing}
-        onMessagesClick={handleMessagesClick}
+        onProfileClick={handleProfileClick}
+        avatarUrl={d.profile.avatarUrl}
       />
 
       <main className="w-full max-w-md bg-white h-[calc(100vh-3.5rem-4rem)] shadow-sm flex flex-col relative overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
