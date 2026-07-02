@@ -21,6 +21,8 @@ export function useDirectMessages() {
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const convPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeChatRef = useRef(activeChat);
+  activeChatRef.current = activeChat; // 轮询闭包始终读到最新 activeChat
 
   const dmUnreadCount = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
@@ -111,11 +113,13 @@ export function useDirectMessages() {
     }
 
     const poll = () => {
+      const chat = activeChatRef.current;
+      if (!chat) return;
       // 获取最新消息（取当前最新消息 id 作为 since 参数）
-      const latestId = activeChat.messages.length > 0
-        ? activeChat.messages[activeChat.messages.length - 1].id
+      const latestId = chat.messages.length > 0
+        ? chat.messages[chat.messages.length - 1].id
         : 0;
-      dmApi.getMessages(activeChat.conversationId)
+      dmApi.getMessages(chat.conversationId)
         .then((res) => {
           if (res.code === 0 && res.data) {
             setActiveChat((prev) => {
