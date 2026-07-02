@@ -11,7 +11,10 @@ import { ok, fail, validate } from '../response';
 import { ErrorCode } from '../errors';
 
 const sendMessageSchema = z.object({
-  content: z.string().min(1, '消息不能为空').max(500, '消息最多500字'),
+  content: z.string().max(500, '消息最多500字').optional().default(''),
+  imageUrl: z.string().max(500).optional(),
+}).refine((v) => (!!v.content && v.content.trim().length > 0) || !!v.imageUrl, {
+  message: '消息不能为空',
 });
 
 const createConversationSchema = z.object({
@@ -27,6 +30,8 @@ export function registerMessageRoutes(app: any, pool: Pool) {
   app.get('/api/v1/conversations', auth, limiter(30), async (req: Request, res: Response) => {
     try {
       const userId = req.userId;
+      // 上报自己的活跃时间（用于在线状态），非阻塞
+      pool.query('UPDATE users SET last_active = NOW() WHERE id = ?', [userId]).catch(() => {});
       const [rows]: any = await pool.query(
         `SELECT
            c.id,
@@ -36,7 +41,9 @@ export function registerMessageRoutes(app: any, pool: Pool) {
            CASE WHEN c.user1_id = ? THEN u2.nickname ELSE u1.nickname END AS other_nickname,
            CASE WHEN c.user1_id = ? THEN u2.avatar_url ELSE u1.avatar_url END AS other_avatar,
            CASE WHEN c.user1_id = ? THEN u2.id ELSE u1.id END AS other_user_id,
-           (SELECT content FROM chat_messages WHERE conversation_id = c.id AND status = 'active' ORDER BY created_at DESC LIMIT 1) AS last_message,
+           CASE WHEN c.user1_id = ? THEN u2.last_active ELSE u1.last_active END AS other_last_active,
+           (SELECT CASE WHEN (content IS NULL OR content = '') AND image_url IS NOT NULL THEN '[图片]' ELSE content END
+              FROM chat_messages WHERE conversation_id = c.id AND status = 'active' ORDER BY created_at DESC LIMIT 1) AS last_message,
            (SELECT COUNT(*) FROM chat_messages WHERE conversation_id = c.id AND sender_id != ? AND is_read = FALSE AND status = 'active') AS unread_count
          FROM conversations c
          JOIN users u1 ON c.user1_id = u1.id
@@ -44,7 +51,7 @@ export function registerMessageRoutes(app: any, pool: Pool) {
          WHERE c.user1_id = ? OR c.user2_id = ?
          ORDER BY c.last_message_at DESC
          LIMIT 50`,
-        [userId, userId, userId, userId, userId, userId],
+        [userId, userId, userId, userId, userId, userId, userId],
       );
       const conversations = rows.map((r: any) => ({
         id: r.id,
@@ -52,6 +59,7 @@ export function registerMessageRoutes(app: any, pool: Pool) {
           id: r.other_user_id,
           nickname: r.other_nickname || '未知用户',
           avatarUrl: r.other_avatar || '',
+          lastActive: r.other_last_active || null,
         },
         lastMessage: r.last_message || null,
         lastMessageAt: r.last_message_at || null,
@@ -97,7 +105,7 @@ export function registerMessageRoutes(app: any, pool: Pool) {
 
     try {
       // 检查目标用户是否存在
-      const [users]: any = await pool.query('SELECT id, nickname, avatar_url FROM users WHERE id = ?', [targetUserId]);
+      const [users]: any = await pool.query('SELECT id, nickname, avatar_url, last_active FROM users WHERE id = ?', [targetUserId]);
       if (users.length === 0) {
         return fail(res, 404, '用户不存在', ErrorCode.NOT_FOUND);
       }
@@ -134,6 +142,7 @@ export function registerMessageRoutes(app: any, pool: Pool) {
           id: targetUser.id,
           nickname: targetUser.nickname || '未知用户',
           avatarUrl: targetUser.avatar_url || '',
+          lastActive: targetUser.last_active || null,
         },
         lastMessage: null,
         lastMessageAt: null,
@@ -171,13 +180,13 @@ export function registerMessageRoutes(app: any, pool: Pool) {
       let query: string;
       let params: any[];
       if (before) {
-        query = `SELECT id, conversation_id, sender_id, content, is_read, created_at
+        query = `SELECT id, conversation_id, sender_id, content, image_url, is_read, created_at
                  FROM chat_messages
                  WHERE conversation_id = ? AND status = 'active' AND id < ?
                  ORDER BY created_at DESC LIMIT ?`;
         params = [conversationId, before, limit];
       } else {
-        query = `SELECT id, conversation_id, sender_id, content, is_read, created_at
+        query = `SELECT id, conversation_id, sender_id, content, image_url, is_read, created_at
                  FROM chat_messages
                  WHERE conversation_id = ? AND status = 'active'
                  ORDER BY created_at DESC LIMIT ?`;
@@ -190,7 +199,8 @@ export function registerMessageRoutes(app: any, pool: Pool) {
         id: r.id,
         conversationId: r.conversation_id,
         senderId: r.sender_id,
-        content: r.content,
+        content: r.content || '',
+        imageUrl: r.image_url || null,
         isRead: !!r.is_read,
         createdAt: r.created_at,
       }));
@@ -222,10 +232,12 @@ export function registerMessageRoutes(app: any, pool: Pool) {
     if (!input) return;
 
     const userId = req.userId!;
+    const content = (input.content || '').trim();
+    const imageUrl = input.imageUrl || null;
 
     // 敏感词过滤（与前端相同的词库）
     const blockedWords = ['fuck', 'shit', '操你', '傻逼', 'sb', 'cnm', '代写', '代考', '作弊', '办证', '嫖娼', '赌博', '毒品'];
-    const lowerContent = input.content.toLowerCase();
+    const lowerContent = content.toLowerCase();
     for (const word of blockedWords) {
       if (lowerContent.includes(word.toLowerCase())) {
         logger.security('私信敏感词拦截', { user_id: userId, word, trace_id: (req as any)._traceId });
@@ -244,8 +256,8 @@ export function registerMessageRoutes(app: any, pool: Pool) {
       }
 
       const [insertResult]: any = await pool.query(
-        'INSERT INTO chat_messages (conversation_id, sender_id, content) VALUES (?, ?, ?)',
-        [conversationId, userId, input.content.trim()],
+        'INSERT INTO chat_messages (conversation_id, sender_id, content, image_url) VALUES (?, ?, ?, ?)',
+        [conversationId, userId, content || null, imageUrl],
       );
 
       // 更新会话最后消息时间
@@ -260,13 +272,14 @@ export function registerMessageRoutes(app: any, pool: Pool) {
         message_id: messageId,
         conversation_id: conversationId,
         sender_id: userId,
-        content_length: input.content.length,
+        content_length: content.length,
+        has_image: !!imageUrl,
         trace_id: (req as any)._traceId,
       });
 
       // 返回完整的消息对象
       const [msgRows]: any = await pool.query(
-        'SELECT id, conversation_id, sender_id, content, is_read, created_at FROM chat_messages WHERE id = ?',
+        'SELECT id, conversation_id, sender_id, content, image_url, is_read, created_at FROM chat_messages WHERE id = ?',
         [messageId],
       );
 
@@ -275,7 +288,8 @@ export function registerMessageRoutes(app: any, pool: Pool) {
         id: msg.id,
         conversationId: msg.conversation_id,
         senderId: msg.sender_id,
-        content: msg.content,
+        content: msg.content || '',
+        imageUrl: msg.image_url || null,
         isRead: !!msg.is_read,
         createdAt: msg.created_at,
       });

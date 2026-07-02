@@ -174,15 +174,16 @@ export function useDirectMessages() {
   }, [activeChat]);
 
   // ── 发送消息（乐观更新） ──
-  const sendMessage = useCallback(async (content: string) => {
-    if (!activeChat || !content.trim()) return false;
+  const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
+    if (!activeChat || (!content.trim() && !imageUrl)) return false;
 
     const tempId = Date.now();
     const optimisticMsg: ChatMessage = {
       id: tempId,
       conversationId: activeChat.conversationId,
-      senderId: 0, // 会被服务端覆盖
+      senderId: currentUserId, // 乐观显示为自己
       content: content.trim(),
+      imageUrl: imageUrl || null,
       isRead: false,
       createdAt: new Date().toISOString(),
     };
@@ -194,7 +195,7 @@ export function useDirectMessages() {
     } : null);
 
     try {
-      const res = await dmApi.sendMessage(activeChat.conversationId, content.trim());
+      const res = await dmApi.sendMessage(activeChat.conversationId, content.trim(), imageUrl);
       if (res.code === 0 && res.data) {
         // 替换临时消息为服务端返回的
         setActiveChat((prev) => {
@@ -221,7 +222,7 @@ export function useDirectMessages() {
       } : null);
       return false;
     }
-  }, [activeChat, loadConversations]);
+  }, [activeChat, loadConversations, currentUserId]);
 
   // ── 从 ProfilePage 发起聊天 ──
   const startChat = useCallback(async (targetUserId: number) => {

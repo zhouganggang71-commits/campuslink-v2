@@ -66,6 +66,8 @@ import {
   UsersRound,
   WifiOff,
   SendHorizonal,
+  Smile,
+  Keyboard,
 } from 'lucide-react';
 import { memo } from 'react';
 
@@ -151,6 +153,8 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   group: UsersRound,
   wifi_off: WifiOff,
   send: SendHorizonal,
+  mood: Smile,
+  keyboard: Keyboard,
 };
 
 function sizeClass(cls: string): number {

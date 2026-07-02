@@ -134,6 +134,7 @@ export interface Conversation {
     id: number;
     nickname: string;
     avatarUrl: string;
+    lastActive?: string | null;
   };
   lastMessage: string | null;
   lastMessageAt: string | null;
@@ -145,6 +146,7 @@ export interface ChatMessage {
   conversationId: number;
   senderId: number;
   content: string;
+  imageUrl?: string | null;
   isRead: boolean;
   createdAt: string;
 }

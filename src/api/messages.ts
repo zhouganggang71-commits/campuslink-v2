@@ -21,9 +21,9 @@ export const dmApi = {
     return request<{ messages: ChatMessage[]; hasMore: boolean }>('GET', `/conversations/${conversationId}/messages${query}`);
   },
 
-  /** 发送消息 */
-  sendMessage(conversationId: number, content: string) {
-    return request<ChatMessage>('POST', `/conversations/${conversationId}/messages`, { content });
+  /** 发送消息（文本 / 图片，二者至少一个） */
+  sendMessage(conversationId: number, content: string, imageUrl?: string) {
+    return request<ChatMessage>('POST', `/conversations/${conversationId}/messages`, { content, imageUrl });
   },
 
   /** 标记会话已读 */

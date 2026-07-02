@@ -1,21 +1,24 @@
 /**
- * 聊天视图 — 仿抖音全屏覆盖层
- * 气泡：己方靠右蓝色，对方靠左灰色，时间分割线
+ * 聊天视图 — 全屏覆盖层
+ * 支持：文本 / 表情 / 图片消息，对方在线状态，己方靠右、对方靠左气泡
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ChatMessage } from '../../types';
+import { uploadApi } from '../../api';
 import Icon from '../ui/Icon';
 
 interface ChatViewProps {
-  otherUser: { id: number; nickname: string; avatarUrl: string };
+  otherUser: { id: number; nickname: string; avatarUrl: string; lastActive?: string | null };
   messages: ChatMessage[];
   hasMore: boolean;
   loading: boolean;
   currentUserId?: number;
   onBack: () => void;
-  onSend: (content: string) => Promise<boolean>;
+  onSend: (content: string, imageUrl?: string) => Promise<boolean>;
   onLoadMore: () => void;
 }
+
+const EMOJIS = ['😀','😂','🤣','😊','😍','🥰','😘','😜','🤔','😅','😳','😭','😡','👍','👎','🙏','👏','💪','🎉','❤️','💔','🔥','✨','⭐','🌈','🍚','🧋','☕','🏀','⚽','📚','💯','✅','❌','😴','🤝','🙈','💤'];
 
 function formatChatTime(dateStr: string): string {
   try {
@@ -26,11 +29,9 @@ function formatChatTime(dateStr: string): string {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const isYesterday = date.toDateString() === yesterday.toDateString();
-
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
     const time = `${hours}:${minutes}`;
-
     if (isToday) return time;
     if (isYesterday) return `昨天 ${time}`;
     return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
@@ -39,11 +40,53 @@ function formatChatTime(dateStr: string): string {
   }
 }
 
+function formatOnline(lastActive?: string | null): string {
+  if (!lastActive) return '';
+  const t = new Date(lastActive).getTime();
+  if (isNaN(t)) return '';
+  const diff = Date.now() - t;
+  if (diff < 2 * 60 * 1000) return '在线';
+  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)} 分钟前活跃`;
+  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} 小时前活跃`;
+  const days = Math.floor(diff / 86400000);
+  if (days < 7) return `${days} 天前活跃`;
+  return '';
+}
+
 function shouldShowTime(msgs: ChatMessage[], index: number): boolean {
   if (index === 0) return true;
   const curr = new Date(msgs[index].createdAt).getTime();
   const prev = new Date(msgs[index - 1].createdAt).getTime();
-  return curr - prev > 5 * 60 * 1000; // 超过5分钟显示时间
+  return curr - prev > 5 * 60 * 1000;
+}
+
+// 图片压缩（Canvas → JPEG，max 1920px）
+function compressImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX = 1920;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas 不可用')); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('转换失败')), 'image/jpeg', 0.8);
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function ChatView({
@@ -59,20 +102,25 @@ export default function ChatView({
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const prevMsgLen = useRef(messages.length);
   const isNearBottom = useRef(true);
 
-  // 记录用户是否在底部
+  const onlineText = formatOnline(otherUser.lastActive);
+  const isOnline = onlineText === '在线';
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }, []);
 
-  // 新消息自动滚到底部（仅当用户已在底部时）
   useEffect(() => {
     if (messages.length > prevMsgLen.current && isNearBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -80,7 +128,6 @@ export default function ChatView({
     prevMsgLen.current = messages.length;
   }, [messages.length]);
 
-  // 首次加载完成后滚到底部
   useEffect(() => {
     if (!loading && messages.length > 0) {
       bottomRef.current?.scrollIntoView();
@@ -92,8 +139,9 @@ export default function ChatView({
     if (!text || sending) return;
     setSending(true);
     setInput('');
+    setShowEmoji(false);
     const ok = await onSend(text);
-    if (!ok) setInput(text); // 发送失败恢复输入
+    if (!ok) setInput(text);
     setSending(false);
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -105,40 +153,89 @@ export default function ChatView({
     }
   };
 
+  const insertEmoji = (emoji: string) => {
+    const el = inputRef.current;
+    const start = el?.selectionStart ?? input.length;
+    const end = el?.selectionEnd ?? input.length;
+    const next = input.slice(0, start) + emoji + input.slice(end);
+    setInput(next);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + emoji.length;
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    let file = e.target.files?.[0];
+    if (!file || uploading || sending) return;
+    if (!file.type.startsWith('image/')) return;
+    setUploading(true);
+    try {
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic');
+      if (isHeic || file.size > 1 * 1024 * 1024) {
+        file = new File([await compressImage(file)], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+      }
+      const form = new FormData();
+      form.append('file', file);
+      const res = await uploadApi.uploadImage(form) as any;
+      if (res.code === 0 && res.data?.url) {
+        await onSend('', res.data.url);
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    } catch { /* 忽略，用户可重试 */ }
+    setUploading(false);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#ededed] animate-fade-in">
+    <div className="flex flex-col h-full bg-[#ededed]">
       {/* ── 顶部栏 ── */}
-      <div className="flex items-center gap-3 px-3 py-2.5 bg-white border-b border-gray-100 shrink-0">
+      <div
+        className="flex items-center gap-3 px-2 pb-2.5 bg-white/95 backdrop-blur border-b border-gray-100 shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 10px)' }}
+      >
         <button
           onClick={onBack}
-          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors shrink-0"
+          aria-label="返回"
+          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 active:scale-90 transition-all shrink-0"
         >
-          <Icon name="arrow_back" className="text-lg text-gray-700" />
+          <Icon name="arrow_back" className="text-xl text-gray-700" />
         </button>
-        {otherUser.avatarUrl && !avatarError ? (
-          <img
-            src={otherUser.avatarUrl}
-            alt=""
-            className="w-9 h-9 rounded-full object-cover bg-slate-100 shrink-0"
-            referrerPolicy="no-referrer"
-            onError={() => setAvatarError(true)}
-          />
-        ) : (
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center shrink-0">
-            <Icon name="person" className="text-lg text-gray-400" />
-          </div>
-        )}
-        <span className="font-semibold text-sm text-gray-900 truncate">{otherUser.nickname}</span>
+        <div className="relative shrink-0">
+          {otherUser.avatarUrl && !avatarError ? (
+            <img
+              src={otherUser.avatarUrl}
+              alt=""
+              className="w-9 h-9 rounded-full object-cover bg-slate-100"
+              referrerPolicy="no-referrer"
+              onError={() => setAvatarError(true)}
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+              <Icon name="person" className="text-lg text-gray-400" />
+            </div>
+          )}
+          {isOnline && (
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-course-green border-2 border-white" />
+          )}
+        </div>
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="font-semibold text-[15px] text-gray-900 truncate leading-tight">{otherUser.nickname}</span>
+          <span className={`text-[10px] leading-tight ${isOnline ? 'text-course-green' : 'text-gray-400'}`}>
+            {onlineText || '校园私信'}
+          </span>
+        </div>
       </div>
 
       {/* ── 消息区域 ── */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onClick={() => setShowEmoji(false)}
         className="flex-1 overflow-y-auto px-3 py-2"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {/* 加载更多 */}
         {hasMore && (
           <div className="flex justify-center py-3">
             <button
@@ -177,16 +274,10 @@ export default function ChatView({
                 </div>
               )}
               <div className={`flex mb-2 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                {/* 对方头像 */}
                 {!isMine && (
                   <div className="shrink-0 mr-2">
                     {otherUser.avatarUrl && !avatarError ? (
-                      <img
-                        src={otherUser.avatarUrl}
-                        alt=""
-                        className="w-8 h-8 rounded-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
+                      <img src={otherUser.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
                         <Icon name="person" className="text-xs text-gray-400" />
@@ -194,23 +285,30 @@ export default function ChatView({
                     )}
                   </div>
                 )}
-                {/* 气泡 */}
                 <div className={`max-w-[70%] ${!isMine && 'ml-0'}`}>
-                  <div
-                    className={`px-3 py-2 text-sm leading-relaxed break-words ${
-                      isMine
-                        ? 'bg-[#576b95] text-white rounded-[16px_4px_16px_16px]'
-                        : 'bg-white text-gray-800 rounded-[4px_16px_16px_16px] shadow-sm'
-                    }`}
-                  >
-                    {msg.content}
-                  </div>
-                  {/* 已读状态 */}
+                  {msg.imageUrl ? (
+                    <a href={msg.imageUrl} target="_blank" rel="noreferrer">
+                      <img
+                        src={msg.imageUrl}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="rounded-2xl max-w-full max-h-60 object-cover border border-black/5 bg-white"
+                      />
+                    </a>
+                  ) : (
+                    <div
+                      className={`px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                        isMine
+                          ? 'bg-[#576b95] text-white rounded-[16px_4px_16px_16px]'
+                          : 'bg-white text-gray-800 rounded-[4px_16px_16px_16px] shadow-sm'
+                      }`}
+                    >
+                      {msg.content}
+                    </div>
+                  )}
                   {isMine && (
                     <div className="text-right mt-0.5 mr-1">
-                      <span className="text-[9px] text-gray-400">
-                        {msg.isRead ? '已读' : '未读'}
-                      </span>
+                      <span className="text-[9px] text-gray-400">{msg.isRead ? '已读' : '未读'}</span>
                     </div>
                   )}
                 </div>
@@ -222,26 +320,71 @@ export default function ChatView({
       </div>
 
       {/* ── 输入栏 ── */}
-      <div className="bg-white border-t border-gray-100 px-3 py-2 flex items-center gap-2 shrink-0">
-        <div className="flex-1 bg-[#f5f5f5] rounded-full">
+      <div className="bg-white border-t border-gray-100 px-3 pt-2 pb-2 flex items-end gap-2 shrink-0 pb-safe">
+        {/* 表情 */}
+        <button
+          onClick={() => { setShowEmoji((v) => !v); }}
+          aria-label="表情"
+          className="w-9 h-10 flex items-center justify-center text-gray-500 hover:text-gray-700 shrink-0 active:scale-90 transition-all"
+        >
+          <Icon name={showEmoji ? 'keyboard' : 'mood'} className="text-xl" />
+        </button>
+        {/* 图片 */}
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          disabled={uploading}
+          aria-label="发送图片"
+          className="w-9 h-10 flex items-center justify-center text-gray-500 hover:text-gray-700 shrink-0 active:scale-90 transition-all disabled:opacity-40"
+        >
+          {uploading ? <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" /> : <Icon name="image" className="text-xl" />}
+        </button>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageSelect}
+        />
+
+        <label className="flex-1 flex items-center bg-[#f5f5f5] rounded-3xl px-4 cursor-text min-h-[40px]">
           <input
+            ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="发送消息..."
+            onFocus={() => setShowEmoji(false)}
+            placeholder="发送消息…"
             maxLength={500}
-            className="w-full bg-transparent px-4 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none"
+            enterKeyHint="send"
+            autoComplete="off"
+            className="w-full bg-transparent py-2 text-[15px] text-gray-800 placeholder-gray-400 outline-none"
           />
-        </div>
+        </label>
         <button
           onClick={handleSend}
           disabled={!input.trim() || sending}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-[#576b95] text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity active:scale-95"
+          aria-label="发送"
+          className="h-10 px-4 flex items-center justify-center rounded-full bg-[#576b95] text-white text-sm font-medium shrink-0 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
         >
-          <Icon name="send" className="text-sm" />
+          {sending ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : '发送'}
         </button>
       </div>
+
+      {/* ── 表情面板 ── */}
+      {showEmoji && (
+        <div className="bg-white border-t border-gray-100 px-3 py-3 grid grid-cols-8 gap-1 shrink-0 pb-safe max-h-52 overflow-y-auto">
+          {EMOJIS.map((em) => (
+            <button
+              key={em}
+              onClick={() => insertEmoji(em)}
+              className="text-2xl h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 active:scale-90 transition-all"
+            >
+              {em}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

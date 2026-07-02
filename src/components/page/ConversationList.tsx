@@ -11,6 +11,12 @@ interface ConversationListProps {
   onOpenChat: (conv: Conversation) => void;
 }
 
+function isOnline(lastActive?: string | null): boolean {
+  if (!lastActive) return false;
+  const t = new Date(lastActive).getTime();
+  return !isNaN(t) && Date.now() - t < 2 * 60 * 1000;
+}
+
 function formatConvTime(dateStr: string | null): string {
   if (!dateStr) return '';
   try {
@@ -76,6 +82,9 @@ export default function ConversationList({ conversations, loading, onOpenChat }:
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
                 <Icon name="person" className="text-xl text-gray-400" />
               </div>
+            )}
+            {isOnline(conv.otherUser.lastActive) && (
+              <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-course-green border-2 border-white" />
             )}
           </div>
 
