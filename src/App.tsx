@@ -364,7 +364,7 @@ export default function App() {
 
       {/* ── 私信聊天覆盖层 ── */}
       {dm.activeChat && (
-        <div className="fixed inset-x-0 top-0 z-50 flex justify-center h-[100dvh]">
+        <div className="fixed inset-0 z-50 flex justify-center">
           <div className="w-full max-w-md h-full flex flex-col bg-[#ededed]">
             <Suspense fallback={<div className="flex items-center justify-center flex-1"><div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mt-20" /></div>}>
               <ChatView
