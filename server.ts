@@ -28,6 +28,7 @@ import { registerFeedbackRoutes } from "./src/server/routes/feedback";
 import { registerCircleRoutes } from "./src/server/routes/circles";
 import { registerNoticeRoutes } from "./src/server/routes/notices";
 import { registerMessageRoutes } from "./src/server/routes/messages";
+import { registerAcademicRoutes } from "./src/server/routes/academic";
 
 // ── 全局错误处理 ──
 installGlobalHandlers();
@@ -281,6 +282,7 @@ safeRegister("feedback",      () => registerFeedbackRoutes(app, pool));
 safeRegister("circles",       () => registerCircleRoutes(app, pool));
 safeRegister("notices",       () => registerNoticeRoutes(app, pool));
 safeRegister("messages",      () => registerMessageRoutes(app, pool));
+safeRegister("academic",      () => registerAcademicRoutes(app, pool));
 
 // ── 全局错误处理 ──
 app.use((err: any, req: any, res: any, next: any) => {
@@ -303,6 +305,14 @@ app.get("/disclaimer", (req, res) => {
 });
 
 // ── SPA fallback ──
+// 根因排查过一次真实故障：浏览器还留着旧 tab（引用旧构建的 index-xxx.css/js 哈希文件名），
+// 新一轮部署把 dist/assets 换成新哈希文件后，旧文件名在磁盘上已经不存在了。
+// 这条路由当时对"任何不是 /api /uploads 的路径"一律兜底返回 index.html——包括这种
+// 明明是静态资源请求、只是文件已经不存在的情况，于是浏览器问 CSS 要来一个 HTML，
+// MIME 类型对不上直接被拒绝，页面没样式、JS 大概率也同样加载失败，整个 app 打不开。
+// 修复：带常见静态资源后缀的路径，找不到就老实回 404，不再兜底成 index.html——
+// 404 至少能让浏览器/用户看出"这个文件没了，该刷新页面"，而不是给一个假响应掩盖问题。
+const STATIC_ASSET_EXT = /\.(js|css|map|png|jpg|jpeg|gif|svg|ico|webp|woff2?|ttf|eot|json)$/i;
 app.get(/^(?!\/api\/|\/uploads\/).*/, (req, res) => {
   const filePath = path.join(distDir, req.path);
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -313,6 +323,10 @@ app.get(/^(?!\/api\/|\/uploads\/).*/, (req, res) => {
       res.setHeader('Expires', '0');
     }
     return res.sendFile(filePath);
+  }
+  if (STATIC_ASSET_EXT.test(req.path)) {
+    logger.warn('静态资源请求但文件不存在，可能是客户端还留着旧构建的引用', { path: req.path, trace_id: (req as any)._traceId });
+    return fail(res, 404, "资源不存在，请刷新页面");
   }
   const indexPath = path.join(distDir, "index.html");
   if (fs.existsSync(indexPath)) {

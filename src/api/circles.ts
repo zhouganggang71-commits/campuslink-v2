@@ -40,9 +40,14 @@ export const circlesApi = {
     return request('DELETE', `/circles/${circleId}/posts/${postId}`);
   },
 
-  /** 点赞（幂等） */
+  /** 点赞（切换，返回最新状态） */
   like(postId: number) {
     return request<{ liked: boolean; like_count: number }>('POST', `/circle-posts/${postId}/like`);
+  },
+
+  /** 点赞列表（当前用户已点赞的帖子 id） */
+  getLikes() {
+    return request<number[]>('GET', '/circle-likes');
   },
 
   /** 评论 */

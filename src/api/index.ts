@@ -9,5 +9,7 @@ export { circlesApi } from './circles';
 export { uploadApi } from './upload';
 export { noticesApi } from './notices';
 export { dmApi } from './messages';
+export { academicApi } from './academic';
+export type { GradeRow, ExamRow } from './academic';
 export { request, setSession, getToken } from './client';
 export type { ApiResponse } from './client';

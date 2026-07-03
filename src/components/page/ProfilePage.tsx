@@ -3,6 +3,7 @@ import { Listing } from '../../types';
 import { authApi, postsApi } from '../../api';
 import { safeParseJsonArray } from '../../utils/time';
 import Icon from '../ui/Icon';
+import GenderBadge from '../ui/GenderBadge';
 
 interface ProfilePageProps {
   userId: number;
@@ -32,6 +33,7 @@ interface UserPublicProfile {
   isVerified: boolean;
   activePosts: number;
   joinedAt: string;
+  gender?: 'male' | 'female' | null;
 }
 
 type ProfileTab = 'posts' | 'saved';
@@ -86,6 +88,7 @@ export default function ProfilePage({ userId, onBack, placeholder, onStartChat }
             publisherId: p.user_id || userId,
             publisherName: p.publisher_name || '',
             publisherAvatar: p.publisher_avatar || '',
+            publisherGender: p.publisher_gender || null,
             isVerifiedStudent: p.publisher_auth_status === 'verified',
             isOfficialOrg: p.is_official,
             publishedTimeText: p.created_at?.substring(0, 10) || '',
@@ -159,6 +162,7 @@ export default function ProfilePage({ userId, onBack, placeholder, onStartChat }
         {/* 姓名 + 认证 */}
         <div className="flex items-center justify-center gap-1.5 mt-3 flex-wrap">
           <h1 className="font-headline text-lg font-bold text-on-surface">{displayName}</h1>
+          <GenderBadge gender={profile?.gender} />
           {displayVerified && (
             <span className="inline-flex items-center gap-0.5 bg-course-green/10 text-course-green px-1.5 py-0.5 rounded-full shrink-0">
               <Icon name="verified" className="text-[9px]" />

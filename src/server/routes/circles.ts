@@ -71,6 +71,8 @@ export function registerCircleRoutes(app: any, pool: any) {
                 COALESCE(cp.tags, '[]') as tags,
                 cp.is_anonymous, cp.like_count, cp.comment_count, cp.created_at,
                 u.nickname, u.auth_status, u.is_admin,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE u.avatar_url END) AS avatar_url,
+                (CASE WHEN cp.is_anonymous OR NOT u.gender_visible THEN NULL ELSE u.gender END) AS gender,
                 ROUND((cp.like_count + cp.comment_count * 2 + 1) / POWER(TIMESTAMPDIFF(HOUR, cp.created_at, NOW()) + 2, 1.5), 2) AS hot_score
          FROM circle_posts cp
          JOIN users u ON cp.user_id = u.id
@@ -116,7 +118,9 @@ export function registerCircleRoutes(app: any, pool: any) {
                 (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
                 cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
-                u.nickname, u.auth_status, u.is_admin
+                u.nickname, u.auth_status, u.is_admin,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE u.avatar_url END) AS avatar_url,
+                (CASE WHEN cp.is_anonymous OR NOT u.gender_visible THEN NULL ELSE u.gender END) AS gender
          FROM circle_posts cp
          JOIN users u ON cp.user_id = u.id
          ${where}
@@ -192,7 +196,9 @@ export function registerCircleRoutes(app: any, pool: any) {
                 (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
                 cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
-                u.nickname, u.auth_status, u.is_admin
+                u.nickname, u.auth_status, u.is_admin,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE u.avatar_url END) AS avatar_url,
+                (CASE WHEN cp.is_anonymous OR NOT u.gender_visible THEN NULL ELSE u.gender END) AS gender
          FROM circle_posts cp JOIN users u ON cp.user_id = u.id WHERE cp.id = ?`,
         [result.insertId]
       );
@@ -225,7 +231,7 @@ export function registerCircleRoutes(app: any, pool: any) {
     }
   });
 
-  // ── 点赞（幂等 + 每人每天最多5个）──
+  // ── 点赞 / 取消点赞（切换，一人一帖只能计一票）──
   app.post('/api/v1/circle-posts/:postId/like', auth, limiter(20), async (req: Request, res: Response) => {
     try {
       if (!(req as any).isVerified) return fail(res, 403, '账号待审核，审核通过后才能点赞');
@@ -238,18 +244,50 @@ export function registerCircleRoutes(app: any, pool: any) {
         return fail(res, 404, '帖子不存在', ErrorCode.CIRCLE_POST_NOT_FOUND);
       }
 
-      // INSERT IGNORE 保证幂等
-      await pool.query('INSERT IGNORE INTO circle_likes (user_id, post_id) VALUES (?, ?)', [userId, postId]);
+      // 已点赞则取消，未点赞则点上 —— 前端据此渲染"已赞"状态，避免重复点击无限加赞的观感
+      // circle_likes 是 (user_id, post_id) 复合主键，没有自增 id 列，直接按这两列查/删
+      const [existing]: any = await pool.query('SELECT 1 FROM circle_likes WHERE user_id = ? AND post_id = ?', [userId, postId]);
+      let liked: boolean;
+      if (existing.length > 0) {
+        await pool.query('DELETE FROM circle_likes WHERE user_id = ? AND post_id = ?', [userId, postId]);
+        liked = false;
+      } else {
+        try {
+          await pool.query('INSERT INTO circle_likes (user_id, post_id) VALUES (?, ?)', [userId, postId]);
+        } catch (insertErr: any) {
+          // 并发双击撞 (user_id, post_id) 主键 → 视为已点赞成功，而不是 500
+          if (insertErr?.errno !== 1062) throw insertErr;
+        }
+        liked = true;
+      }
 
-      // 重算点赞数
+      // 重算点赞数（以 circle_likes 实际行数为准，避免计数漂移）
       const [countRows]: any = await pool.query('SELECT COUNT(*) AS cnt FROM circle_likes WHERE post_id = ?', [postId]);
       const count = countRows[0].cnt;
       await pool.query('UPDATE circle_posts SET like_count = ? WHERE id = ?', [count, postId]);
 
-      ok(res, { liked: true, like_count: count });
+      logger.business('校园圈点赞切换', { user_id: userId, post_id: postId, liked, trace_id: (req as any)._traceId });
+      ok(res, { liked, like_count: count });
     } catch (err: any) {
       logger.error('校园圈点赞失败', { error: err.message, trace_id: (req as any)._traceId });
       fail(res, 500, '操作失败', ErrorCode.INTERNAL_ERROR);
+    }
+  });
+
+  // ── 点赞列表（当前用户已点赞的帖子 id，供前端渲染"已赞"高亮）──
+  app.get('/api/v1/circle-likes', auth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const [rows]: any = await pool.query(
+        `SELECT cl.post_id AS id FROM circle_likes cl
+         JOIN circle_posts cp ON cl.post_id = cp.id
+         WHERE cl.user_id = ? AND cp.status = 'active'`,
+        [userId]
+      );
+      ok(res, rows.map((r: any) => r.id));
+    } catch (err: any) {
+      logger.error('校园圈点赞列表失败', { error: err.message, trace_id: (req as any)._traceId });
+      fail(res, 500, '获取失败', ErrorCode.INTERNAL_ERROR);
     }
   });
 
@@ -376,7 +414,9 @@ export function registerCircleRoutes(app: any, pool: any) {
                 (CASE WHEN cp.is_anonymous THEN NULL ELSE cp.user_id END) AS user_id,
                 cp.images, cp.tags, cp.is_anonymous,
                 cp.like_count, cp.comment_count, cp.created_at,
-                u.nickname, u.auth_status, u.is_admin
+                u.nickname, u.auth_status, u.is_admin,
+                (CASE WHEN cp.is_anonymous THEN NULL ELSE u.avatar_url END) AS avatar_url,
+                (CASE WHEN cp.is_anonymous OR NOT u.gender_visible THEN NULL ELSE u.gender END) AS gender
          FROM circle_favorites cf
          JOIN circle_posts cp ON cf.post_id = cp.id
          JOIN users u ON cp.user_id = u.id

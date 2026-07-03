@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Icon from '../ui/Icon';
 import Button from '../ui/Button';
+import GenderBadge from '../ui/GenderBadge';
 import { getToken } from '../../utils/api';
 import { circlesApi, uploadApi } from '../../api';
 import { timeAgo } from '../../utils/time';
@@ -21,20 +22,20 @@ interface CommentItem {
 interface CirclePostDetailProps {
   post: CirclePost;
   onBack: () => void;
-  onLike: (postId: number) => Promise<boolean>;
+  onLike: (postId: number) => void;
   onSave: (postId: number) => void;
   isSaved: boolean;
+  isLiked?: boolean;
   showToast: (msg: string, type?: 'success' | 'info') => void;
   onViewProfile?: (userId: number, placeholder: any) => void;
 }
 
-export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved, showToast, onViewProfile }: CirclePostDetailProps) {
+export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved, isLiked, showToast, onViewProfile }: CirclePostDetailProps) {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: number; name: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [localLikeCount, setLocalLikeCount] = useState(post.like_count);
   const [commentImage, setCommentImage] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -132,10 +133,11 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
-  const handleLikeClick = async () => {
+  const [justLiked, setJustLiked] = useState(false);
+  const handleLikeClick = () => {
     if (!getToken()) { showToast('请先登录'); return; }
-    const ok = await onLike(post.id);
-    if (ok) setLocalLikeCount((c) => c + 1);
+    if (!isLiked) setJustLiked(true);
+    onLike(post.id);
   };
 
   return (
@@ -156,18 +158,23 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
             if (!post.is_anonymous && onViewProfile) {
               onViewProfile(post.user_id || 0, {
                 name: post.nickname || '',
-                avatar: '',
+                avatar: post.avatar_url || '',
                 isVerified: post.auth_status === 'verified',
               });
             }
           }}
         >
-          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-            <Icon name="person" className="text-lg text-gray-400" />
+          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0 overflow-hidden">
+            {post.avatar_url ? (
+              <img src={post.avatar_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <Icon name="person" className="text-lg text-gray-400" />
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-semibold">{displayName}</span>
+              <GenderBadge gender={post.gender} />
               {!post.is_anonymous && post.auth_status === 'verified' && (
                 <Icon name="verified" className="text-[10px] text-course-green" />
               )}
@@ -210,9 +217,18 @@ export default function CirclePostDetail({ post, onBack, onLike, onSave, isSaved
 
         {/* 互动栏 */}
         <div className="px-4 py-3 flex items-center gap-5 border-y border-gray-50">
-          <button onClick={handleLikeClick} className="flex items-center gap-1 text-sm text-gray-500 hover:text-course-red transition-colors cursor-pointer">
-            <Icon name="favorite" className="text-base" />
-            <span className="text-xs">{localLikeCount || 0}</span>
+          <button
+            onClick={handleLikeClick}
+            aria-pressed={isLiked}
+            className={`flex items-center gap-1 text-sm transition-colors cursor-pointer ${isLiked ? 'text-course-red' : 'text-gray-500 hover:text-course-red'}`}
+          >
+            <span
+              className={`inline-flex ${justLiked ? 'animate-heart-pop' : ''}`}
+              onAnimationEnd={() => setJustLiked(false)}
+            >
+              <Icon name="favorite" className="text-base" />
+            </span>
+            <span className="text-xs">{post.like_count || 0}</span>
           </button>
           <span className="flex items-center gap-1 text-sm text-gray-400">
             <Icon name="chat" className="text-base" />

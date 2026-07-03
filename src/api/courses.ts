@@ -8,6 +8,11 @@ export const coursesApi = {
     return request<any[]>('GET', '/courses');
   },
 
+  /** 该用户已有数据的学年学期组合，用于渲染"学年+学期"选择器 */
+  terms() {
+    return request<{ school_year: string; school_term: string }[]>('GET', '/courses/terms');
+  },
+
   create(course: {
     name: string; teacher: string; classroom: string;
     weekday: number; startPeriod: number; periodSpan?: number;

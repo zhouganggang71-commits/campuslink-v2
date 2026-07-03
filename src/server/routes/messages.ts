@@ -23,7 +23,26 @@ const createConversationSchema = z.object({
 
 export function registerMessageRoutes(app: any, pool: Pool) {
   function isSchemaError(err: any): boolean {
-    return err?.errno === 1054 || err?.code === 'ER_BAD_FIELD_ERROR';
+    return err?.errno === 1054 || err?.code === 'ER_BAD_FIELD_ERROR' || err?.errno === 1146;
+  }
+
+  /** 我拉黑的人（user_blocks 未迁移时返回空数组，优雅降级不影响私信主流程） */
+  async function getBlockedIds(userId: number): Promise<number[]> {
+    try {
+      const [rows]: any = await pool.query('SELECT blocked_id FROM user_blocks WHERE blocker_id = ?', [userId]);
+      return rows.map((r: any) => r.blocked_id);
+    } catch { return []; }
+  }
+
+  /** 双向拉黑检查：任一方拉黑另一方即为 true */
+  async function isBlockedBetween(a: number, b: number): Promise<boolean> {
+    try {
+      const [rows]: any = await pool.query(
+        'SELECT 1 FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?) LIMIT 1',
+        [a, b, b, a],
+      );
+      return rows.length > 0;
+    } catch { return false; }
   }
 
   // ── 获取我的会话列表 ──
@@ -53,18 +72,22 @@ export function registerMessageRoutes(app: any, pool: Pool) {
          LIMIT 50`,
         [userId, userId, userId, userId, userId, userId, userId],
       );
-      const conversations = rows.map((r: any) => ({
-        id: r.id,
-        otherUser: {
-          id: r.other_user_id,
-          nickname: r.other_nickname || '未知用户',
-          avatarUrl: r.other_avatar || '',
-          lastActive: r.other_last_active || null,
-        },
-        lastMessage: r.last_message || null,
-        lastMessageAt: r.last_message_at || null,
-        unreadCount: r.unread_count || 0,
-      }));
+      // 过滤掉我拉黑的用户的会话
+      const blockedSet = new Set(await getBlockedIds(userId!));
+      const conversations = rows
+        .filter((r: any) => !blockedSet.has(r.other_user_id))
+        .map((r: any) => ({
+          id: r.id,
+          otherUser: {
+            id: r.other_user_id,
+            nickname: r.other_nickname || '未知用户',
+            avatarUrl: r.other_avatar || '',
+            lastActive: r.other_last_active || null,
+          },
+          lastMessage: r.last_message || null,
+          lastMessageAt: r.last_message_at || null,
+          unreadCount: r.unread_count || 0,
+        }));
       ok(res, conversations);
     } catch (err: any) {
       if (isSchemaError(err)) return ok(res, []);
@@ -77,12 +100,17 @@ export function registerMessageRoutes(app: any, pool: Pool) {
   app.get('/api/v1/conversations/unread-count', auth, limiter(60), async (req: Request, res: Response) => {
     try {
       const userId = req.userId;
-      const [rows]: any = await pool.query(
-        `SELECT COUNT(*) AS count FROM chat_messages m
+      // 排除我拉黑的用户发来的消息
+      const blockedIds = await getBlockedIds(userId!);
+      let sql = `SELECT COUNT(*) AS count FROM chat_messages m
          JOIN conversations c ON m.conversation_id = c.id
-         WHERE (c.user1_id = ? OR c.user2_id = ?) AND m.sender_id != ? AND m.is_read = FALSE AND m.status = 'active'`,
-        [userId, userId, userId],
-      );
+         WHERE (c.user1_id = ? OR c.user2_id = ?) AND m.sender_id != ? AND m.is_read = FALSE AND m.status = 'active'`;
+      const params: any[] = [userId, userId, userId];
+      if (blockedIds.length > 0) {
+        sql += ` AND m.sender_id NOT IN (${blockedIds.map(() => '?').join(',')})`;
+        params.push(...blockedIds);
+      }
+      const [rows]: any = await pool.query(sql, params);
       ok(res, { count: rows[0]?.count || 0 });
     } catch (err: any) {
       if (isSchemaError(err)) return ok(res, { count: 0 });
@@ -112,6 +140,12 @@ export function registerMessageRoutes(app: any, pool: Pool) {
 
       const targetUser = users[0];
 
+      // 双向拉黑检查（不区分方向，避免暴露谁拉黑了谁）
+      if (await isBlockedBetween(userId, targetUserId)) {
+        logger.security('拉黑用户间发起会话被拒', { user_id: userId, target_id: targetUserId, trace_id: (req as any)._traceId });
+        return fail(res, 403, '无法向该用户发起会话');
+      }
+
       // 查找或创建会话（使用 LEAST/GREATEST 保证顺序）
       const [convRows]: any = await pool.query(
         `SELECT id FROM conversations
@@ -123,17 +157,28 @@ export function registerMessageRoutes(app: any, pool: Pool) {
       if (convRows.length > 0) {
         conversationId = convRows[0].id;
       } else {
-        const [insertResult]: any = await pool.query(
-          'INSERT INTO conversations (user1_id, user2_id) VALUES (LEAST(?, ?), GREATEST(?, ?))',
-          [userId, targetUserId, userId, targetUserId],
-        );
-        conversationId = insertResult.insertId;
-        logger.business('创建新会话', {
-          conversation_id: conversationId,
-          user1: Math.min(userId, targetUserId),
-          user2: Math.max(userId, targetUserId),
-          trace_id: (req as any)._traceId,
-        });
+        try {
+          const [insertResult]: any = await pool.query(
+            'INSERT INTO conversations (user1_id, user2_id) VALUES (LEAST(?, ?), GREATEST(?, ?))',
+            [userId, targetUserId, userId, targetUserId],
+          );
+          conversationId = insertResult.insertId;
+          logger.business('创建新会话', {
+            conversation_id: conversationId,
+            user1: Math.min(userId, targetUserId),
+            user2: Math.max(userId, targetUserId),
+            trace_id: (req as any)._traceId,
+          });
+        } catch (insertErr: any) {
+          // 并发双击撞 uk_user_pair 唯一键 → 重查已存在的会话，而不是 500
+          if (insertErr?.errno !== 1062) throw insertErr;
+          const [retryRows]: any = await pool.query(
+            'SELECT id FROM conversations WHERE user1_id = LEAST(?, ?) AND user2_id = GREATEST(?, ?)',
+            [userId, targetUserId, userId, targetUserId],
+          );
+          if (retryRows.length === 0) throw insertErr;
+          conversationId = retryRows[0].id;
+        }
       }
 
       ok(res, {
@@ -248,11 +293,18 @@ export function registerMessageRoutes(app: any, pool: Pool) {
     try {
       // 验证会话归属
       const [convRows]: any = await pool.query(
-        'SELECT id FROM conversations WHERE id = ? AND (user1_id = ? OR user2_id = ?)',
+        'SELECT id, user1_id, user2_id FROM conversations WHERE id = ? AND (user1_id = ? OR user2_id = ?)',
         [conversationId, userId, userId],
       );
       if (convRows.length === 0) {
         return fail(res, 404, '会话不存在', ErrorCode.NOT_FOUND);
+      }
+
+      // 双向拉黑检查：任一方拉黑后禁止发送（不暴露方向）
+      const otherUserId = convRows[0].user1_id === userId ? convRows[0].user2_id : convRows[0].user1_id;
+      if (await isBlockedBetween(userId, otherUserId)) {
+        logger.security('拉黑用户间发私信被拒', { user_id: userId, other_id: otherUserId, conversation_id: conversationId, trace_id: (req as any)._traceId });
+        return fail(res, 403, '消息发送失败');
       }
 
       const [insertResult]: any = await pool.query(
@@ -297,6 +349,56 @@ export function registerMessageRoutes(app: any, pool: Pool) {
       if (isSchemaError(err)) return fail(res, 500, '私信功能暂不可用');
       logger.error('发送消息失败', { error: err.message, user_id: userId, trace_id: (req as any)._traceId });
       fail(res, 500, '发送消息失败');
+    }
+  });
+
+  // ── 拉黑用户 ──
+  app.post('/api/v1/users/:id/block', auth, limiter(5), async (req: Request, res: Response) => {
+    const targetId = parseInt(req.params.id as string, 10);
+    if (isNaN(targetId) || targetId < 1) return fail(res, 400, '用户ID无效');
+    if (targetId === req.userId) return fail(res, 400, '不能拉黑自己');
+    try {
+      const [users]: any = await pool.query('SELECT id FROM users WHERE id = ?', [targetId]);
+      if (users.length === 0) return fail(res, 404, '用户不存在', ErrorCode.NOT_FOUND);
+      await pool.query('INSERT IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)', [req.userId, targetId]);
+      logger.business('拉黑用户', { user_id: req.userId, blocked_id: targetId, trace_id: (req as any)._traceId });
+      ok(res, { blocked: true });
+    } catch (err: any) {
+      if (isSchemaError(err)) return fail(res, 500, '功能暂不可用');
+      logger.error('拉黑失败', { error: err.message, user_id: req.userId, trace_id: (req as any)._traceId });
+      fail(res, 500, '操作失败');
+    }
+  });
+
+  // ── 取消拉黑 ──
+  app.delete('/api/v1/users/:id/block', auth, limiter(5), async (req: Request, res: Response) => {
+    const targetId = parseInt(req.params.id as string, 10);
+    if (isNaN(targetId) || targetId < 1) return fail(res, 400, '用户ID无效');
+    try {
+      await pool.query('DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?', [req.userId, targetId]);
+      logger.business('取消拉黑', { user_id: req.userId, blocked_id: targetId, trace_id: (req as any)._traceId });
+      ok(res, { blocked: false });
+    } catch (err: any) {
+      if (isSchemaError(err)) return fail(res, 500, '功能暂不可用');
+      logger.error('取消拉黑失败', { error: err.message, user_id: req.userId, trace_id: (req as any)._traceId });
+      fail(res, 500, '操作失败');
+    }
+  });
+
+  // ── 我的拉黑列表 ──
+  app.get('/api/v1/users/blocked', auth, limiter(10), async (req: Request, res: Response) => {
+    try {
+      const [rows]: any = await pool.query(
+        `SELECT b.blocked_id AS id, u.nickname, u.avatar_url AS avatarUrl, b.created_at AS blockedAt
+         FROM user_blocks b JOIN users u ON b.blocked_id = u.id
+         WHERE b.blocker_id = ? ORDER BY b.created_at DESC`,
+        [req.userId],
+      );
+      ok(res, rows);
+    } catch (err: any) {
+      if (isSchemaError(err)) return ok(res, []);
+      logger.error('获取拉黑列表失败', { error: err.message, user_id: req.userId, trace_id: (req as any)._traceId });
+      fail(res, 500, '获取失败');
     }
   });
 

@@ -16,6 +16,7 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
   const [status, setStatus] = useState<'loading' | 'waiting_qr' | 'scanning' | 'scanned' | 'success' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadingRef = useRef(false);
   // 用 ref 存最新状态，避免闭包过期问题
   const statusRef = useRef(status);
   const qrCodeRef = useRef(qrCode);
@@ -31,6 +32,7 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
       setSessionId(null);
       setStatus('loading');
       setErrorMsg('');
+      loadingRef.current = false;
       return;
     }
 
@@ -42,6 +44,8 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
   }, [isOpen]);
 
   async function startLogin() {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setStatus('loading');
     try {
       const data = await getWechatQr();
@@ -52,6 +56,8 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
     } catch (err: any) {
       setStatus('error');
       setErrorMsg(err.message || '获取二维码失败，请重试');
+    } finally {
+      loadingRef.current = false;
     }
   }
 
@@ -71,10 +77,10 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
 
       try {
         const result = await pollWechatLogin(sid);
-        if (result.status === 'starting') {
-          return;
+        if (result.status === 'starting' || result.status === 'rate_limited') {
+          return; // 限流本轮跳过，下一轮继续
         }
-        if (result.status === 'error') {
+        if (result.status === 'error' || result.status === 'expired') {
           clearInterval(pollingRef.current!);
           setStatus('error');
           setErrorMsg(result.message || '获取二维码超时，请重试');
@@ -101,9 +107,9 @@ export default function WechatLoginModal({ isOpen, onClose, onLoginSuccess, show
           setTimeout(() => onClose(), 1500);
         }
       } catch (err: any) {
-        console.warn('轮询失败', err.message);
+        console.warn('轮询失败', err.message); // 网络抖动等，下一轮继续
       }
-    }, 1000);
+    }, 2000); // 2s/次 = 30次/分，配合服务端 poll 限流 60/分留一倍余量
   }
 
   function handleRetry() {

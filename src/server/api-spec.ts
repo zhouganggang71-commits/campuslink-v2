@@ -83,8 +83,12 @@ export const apiSpec = {
     '/courses': {
       get: {
         tags: ['课表'],
-        summary: '获取课表（需认证）',
+        summary: '获取课表（需认证，可选 school_year/school_term 按学期筛选）',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'school_year', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'school_term', in: 'query', required: false, schema: { type: 'string' } },
+        ],
         responses: { '200': { description: '课程列表' } },
       },
       post: {
@@ -92,6 +96,14 @@ export const apiSpec = {
         summary: '添加课程（需认证）',
         security: [{ bearerAuth: [] }],
         responses: { '200': { description: '添加成功' } },
+      },
+    },
+    '/courses/terms': {
+      get: {
+        tags: ['课表'],
+        summary: '获取该用户已同步的学年学期列表（需认证）',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: '学年学期组合列表' } },
       },
     },
     '/courses/batch': {

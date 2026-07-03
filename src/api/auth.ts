@@ -16,6 +16,16 @@ export const authApi = {
     return request<any>('POST', '/auth/refresh', { refresh_token: refreshToken });
   },
 
+  /** 当前登录用户信息（页面刷新后用 token 恢复登录态） */
+  me() {
+    return request<{
+      id: number; studentId: string; nickname: string; authStatus: string; isAdmin: boolean;
+      avatarUrl: string; coverUrl: string; bio: string;
+      department: string; orgLevel: string; orgName: string; position: string;
+      gender: 'male' | 'female' | null; genderVisible: boolean;
+    }>('GET', '/auth/me');
+  },
+
   logout() {
     return request('POST', '/auth/logout');
   },
@@ -30,6 +40,11 @@ export const authApi = {
 
   updateProfile(bio: string) {
     return request<any>('PUT', '/auth/profile', { bio });
+  },
+
+  /** 更新性别 / 性别是否公开（默认隐藏，用户自己开启才会在帖子里展示） */
+  updateGender(gender: 'male' | 'female' | null, genderVisible: boolean) {
+    return request<{ gender: 'male' | 'female' | null; genderVisible: boolean }>('PUT', '/auth/profile', { gender, genderVisible });
   },
 
   changePassword(password: string, oldPassword?: string) {

@@ -282,14 +282,19 @@ export default function AuthModal({ isOpen, onClose, onSubmit, initialValues, sh
           </>
         )}
         <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">设置密码 *</label>
+          <label className="block text-xs font-bold text-gray-600 mb-1">{isLogin ? '密码 *' : '设置密码 *'}</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="至少6位，用于以后登录"
+            placeholder={isLogin ? '输入登录密码' : '至少6位，用于以后登录'}
             className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all"
           />
+          {isLogin && (
+            <p className="text-[10px] text-gray-400 mt-1">
+              忘记密码？用「微信扫码登录」进入后，在「我的 → 修改密码」中免旧密码重设
+            </p>
+          )}
         </div>
         {!isLogin && (
           <div>

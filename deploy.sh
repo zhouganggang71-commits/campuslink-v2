@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 N100="ubuntu@100.117.221.27"
-ssh -o ConnectTimeout=2 "$N100" "echo ok" 2>/dev/null || N100="ubuntu@192.168.1.10"
+# Tailscale SSH 握手较慢，2s 不够，用 8s 避免误 fallback 到内网地址
+ssh -o ConnectTimeout=8 "$N100" "echo ok" 2>/dev/null || N100="ubuntu@192.168.1.10"
 APP="/home/ubuntu/app/campuslink"
 DIR="$APP/dist"
 cd "$(dirname "$0")"
@@ -17,8 +18,18 @@ echo "  CSS: $(basename $CSS) ($(wc -c < $CSS | tr -d ' ') bytes)"
 echo "  SRV: $(wc -c < dist/server.cjs | tr -d ' ') bytes"
 
 # ── 2/6 上传代码 ──
+# 根因排查过一次真实故障：之前是先把 assets/* 平铺 scp 到 dist/ 根目录，再靠 5/6 步骤里
+# `mv *.js assets/`/`mv *.css assets/` 挪到 dist/assets/ 下——这两条 mv 后面跟着 2>/dev/null，
+# 而且整段是一次性丢给远程 ssh 执行、没有 set -e，只要 mv 因为任何原因失败（比如 cwd 不对、
+# glob 没匹配上），错误会被吞掉、脚本继续跑完 pm2 restart，最终效果是 index.html 引用的新哈希
+# 文件名，实际根本没进 dist/assets/，浏览器请求 CSS/JS 直接 404。
+# 现在直接把 assets 传到目标目录，不再依赖之后的 mv 重新归位，砍掉这一整类失败可能。
 echo "=== 2/6 上传 ==="
-scp dist/assets/* dist/index.html dist/server.cjs dist/admin.html dist/disclaimer.html dist/logo.png "$N100:$DIR/" 2>/dev/null
+# 先清空远程 assets/ 再传，避免旧哈希文件长期堆积；清空和上传在同一步完成，不再依赖后面单独的
+# mv 命令去重新归位，减少"传完了但没归位"的中间状态
+ssh "$N100" "rm -rf $DIR/assets && mkdir -p $DIR/assets"
+scp dist/assets/* "$N100:$DIR/assets/"
+scp dist/index.html dist/server.cjs dist/admin.html dist/disclaimer.html dist/logo.png "$N100:$DIR/"
 # 上传 PWA 文件（manifest + service worker + 图标）
 scp dist/sw.js dist/registerSW.js dist/workbox-*.js dist/manifest.webmanifest dist/pwa-*.png "$N100:$DIR/" 2>/dev/null
 # 同步 package 文件（依赖变了自动装）
@@ -60,16 +71,11 @@ ssh "$N100" "
 "
 
 # ── 5/6 部署 ──
+# assets 已经在 2/6 直接传到位了（sw.js 也在 2/6 单独传到 dist/ 根目录，不会被误放进 assets/），
+# 这里不再需要事后用 mv 重新归位，只管重启进程
 echo "=== 5/6 部署 ==="
 ssh "$N100" "
   cd $DIR
-  # 首页资源 + chunks 移入 assets/
-  rm -rf assets
-  mkdir assets
-  mv *.js assets/ 2>/dev/null
-  mv *.css assets/ 2>/dev/null
-  # sw.js 必须保留在根目录（Service Worker scope）
-  mv assets/sw.js . 2>/dev/null
   pm2 restart campuslink
   sleep 2
 "

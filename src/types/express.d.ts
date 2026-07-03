@@ -12,6 +12,8 @@ declare global {
       userId?: number;
       isAdmin?: boolean;
       isVerified?: boolean;
+      /** 当前 access token 的认证方式（password 密码 / scan 教务扫码） */
+      authMethod?: 'password' | 'scan';
       _traceId?: string;
       _sessionId?: string;
     }

@@ -71,6 +71,7 @@ export default function SearchPage({
           publisherId: p.user_id || 0,
           publisherName: p.publisher_name || p.nickname || '',
           publisherAvatar: p.publisher_avatar || '',
+          publisherGender: p.publisher_gender || null,
           isVerifiedStudent: p.publisher_auth_status === 'verified',
           isOfficialOrg: p.is_official,
           orgName: p.org_name || p.publisher_org_name,

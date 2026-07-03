@@ -4,7 +4,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ChatMessage } from '../../types';
-import { uploadApi } from '../../api';
+import { uploadApi, dmApi } from '../../api';
 import Icon from '../ui/Icon';
 
 interface ChatViewProps {
@@ -104,6 +104,30 @@ export default function ChatView({
   const [avatarError, setAvatarError] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+
+  // 打开聊天时查真实拉黑状态（原来初始恒 false，重进聊天后按钮/横幅状态丢失）
+  useEffect(() => {
+    let alive = true;
+    dmApi.blockedList().then((res) => {
+      if (alive && res.code === 0 && Array.isArray(res.data)) {
+        setBlocked(res.data.some((u) => u.id === otherUser.id));
+      }
+    }).catch(() => { /* 查询失败按未拉黑展示，发送时服务端仍会拦截 */ });
+    return () => { alive = false; };
+  }, [otherUser.id]);
+
+  const handleToggleBlock = async () => {
+    if (blockBusy) return;
+    if (!blocked && !window.confirm(`拉黑后你和 ${otherUser.nickname} 将无法互发私信，确定拉黑吗？`)) return;
+    setBlockBusy(true);
+    try {
+      const res = blocked ? await dmApi.unblockUser(otherUser.id) : await dmApi.blockUser(otherUser.id);
+      if (res.code === 0) setBlocked(!blocked);
+    } catch { /* 网络失败保持原状态，用户可重试 */ }
+    setBlockBusy(false);
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -226,7 +250,25 @@ export default function ChatView({
             {onlineText || '校园私信'}
           </span>
         </div>
+        <button
+          onClick={handleToggleBlock}
+          disabled={blockBusy}
+          aria-label={blocked ? '取消拉黑' : '拉黑用户'}
+          className={`w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 active:scale-90 transition-all shrink-0 disabled:opacity-40 ${blocked ? 'text-red-500' : 'text-gray-400'}`}
+        >
+          <Icon name="block" className="text-lg" />
+        </button>
       </div>
+
+      {/* ── 拉黑状态横幅 ── */}
+      {blocked && (
+        <div className="flex items-center justify-between gap-2 px-4 py-2 bg-red-50 border-b border-red-100 shrink-0">
+          <span className="text-xs text-red-500">已拉黑该用户，双方无法互发私信</span>
+          <button onClick={handleToggleBlock} disabled={blockBusy} className="text-xs text-primary font-medium disabled:opacity-40">
+            取消拉黑
+          </button>
+        </div>
+      )}
 
       {/* ── 消息区域 ── */}
       <div

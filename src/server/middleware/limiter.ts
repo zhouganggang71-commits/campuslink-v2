@@ -11,7 +11,10 @@ interface RateEntry {
   minReset: number;
 }
 
-const rateLimit = new Map<string, RateEntry>();
+// 每个 limiter 实例（即每个接口）独立计数桶。
+// 修复：旧实现全部接口共享同一个按 IP 的计数器，登录后的背景轮询
+// （私信 3s/会话 15s）会把计数顶满，导致扫码登录等低频接口误判 429。
+const allStores: Map<string, RateEntry>[] = [];
 
 // 每 60 秒清理过期条目，防止 Map 无限增长
 const CLEANUP_INTERVAL = 60_000;
@@ -23,14 +26,18 @@ function startCleanup() {
   setInterval(() => {
     const now = Date.now();
     let deleted = 0;
-    for (const [key, entry] of rateLimit) {
-      if (now > entry.secReset && now > entry.minReset) {
-        rateLimit.delete(key);
-        deleted++;
+    let remaining = 0;
+    for (const store of allStores) {
+      for (const [key, entry] of store) {
+        if (now > entry.secReset && now > entry.minReset) {
+          store.delete(key);
+          deleted++;
+        }
       }
+      remaining += store.size;
     }
     if (deleted > 0) {
-      logger.info(`限流器清理: 移除 ${deleted} 个过期条目, 剩余 ${rateLimit.size}`);
+      logger.info(`限流器清理: 移除 ${deleted} 个过期条目, 剩余 ${remaining}`);
     }
   }, CLEANUP_INTERVAL);
 }
@@ -38,14 +45,16 @@ function startCleanup() {
 startCleanup();
 
 export function limiter(maxPerSec: number, maxPerMinute?: number) {
+  const store = new Map<string, RateEntry>();
+  allStores.push(store);
   return (req: Request, res: Response, next: NextFunction) => {
     const ip = req.ip || 'unknown';
     const now = Date.now();
-    let entry = rateLimit.get(ip);
+    let entry = store.get(ip);
 
     if (!entry) {
       entry = { secCount: 0, secReset: now + 1000, minCount: 0, minReset: now + 60_000 };
-      rateLimit.set(ip, entry);
+      store.set(ip, entry);
     }
 
     // 重置过期窗口

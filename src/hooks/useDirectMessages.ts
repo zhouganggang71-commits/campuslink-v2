@@ -129,8 +129,9 @@ export function useDirectMessages() {
               );
               if (newMsgs.length === 0) return prev;
               // 标记对方消息为已读
-              const otherNewMsgs = newMsgs.filter((m: ChatMessage) => m.senderId !== prev.otherUser.id);
-              if (otherNewMsgs.length === 0) {
+              // 检查消息是否全来自对方（自己的消息不算"别人发了新消息"）
+              const ownNewMsgs = newMsgs.filter((m: ChatMessage) => m.senderId !== prev.otherUser.id);
+              if (ownNewMsgs.length === 0) {
                 dmApi.markRead(prev.conversationId).catch(() => {});
               }
               return {

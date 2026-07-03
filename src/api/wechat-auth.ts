@@ -9,7 +9,8 @@ export interface WechatQrResponse {
 }
 
 export interface WechatPollResponse {
-  status: 'starting' | 'scanning' | 'scanned' | 'done' | 'error';
+  /** rate_limited=被限流本轮跳过；expired=会话已过期需重新扫码 */
+  status: 'starting' | 'scanning' | 'scanned' | 'done' | 'error' | 'rate_limited' | 'expired';
   qrCode?: string;
   token?: string;
   refresh_token?: string;
@@ -41,6 +42,10 @@ export async function pollWechatLogin(sessionId: string): Promise<WechatPollResp
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId }),
   });
+  // 429 = 被限流，不是失败——本轮跳过，下一轮继续
+  if (res.status === 429) return { status: 'rate_limited' };
+  // 404 = 会话已过期/不存在，继续轮询无意义，提示重新扫码
+  if (res.status === 404) return { status: 'expired', message: '会话已过期，请重新扫码' };
   const data = await res.json();
   if (data.code !== 0) throw new Error(data.message || '登录失败');
   return data.data;

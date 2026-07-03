@@ -3,7 +3,7 @@
  */
 import { Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { auth } from '../middleware/auth';
+import { auth, optionalAuth } from '../middleware/auth';
 import { limiter } from '../middleware/limiter';
 import { logger } from '../../utils/logger';
 import { checkSensitive } from '../../utils/sensitiveFilter';
@@ -12,8 +12,13 @@ import { ok, fail, notFound, validate } from '../response';
 import { createPostSchema } from '../validators';
 import { encrypt, decrypt } from '../crypto';
 
-function decryptPost(p: any) {
-  return { ...p, contact_info: decrypt(p.contact_info) || p.contact_info };
+/**
+ * 联系方式仅对「已认证用户 / 管理员 / 帖子作者本人」解密返回，
+ * 匿名或未认证请求返回 null，防止微信号/手机号被爬虫批量采集。
+ */
+function decryptPost(p: any, req?: Request) {
+  const canSeeContact = !!req && (req.isVerified || req.isAdmin || (req.userId != null && req.userId === p.user_id));
+  return { ...p, contact_info: canSeeContact ? (decrypt(p.contact_info) || p.contact_info) : null };
 }
 
 export function registerPostRoutes(app: any, pool: Pool) {
@@ -30,7 +35,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
   }, 6 * 60 * 60 * 1000);
 
   // 列表
-  app.get('/api/v1/posts', async (req: Request, res: Response) => {
+  app.get('/api/v1/posts', optionalAuth, async (req: Request, res: Response) => {
     try {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
@@ -40,9 +45,11 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const keyword = (req.query.keyword as string) || '';
       const userId = parseInt(req.query.userId as string) || 0;
 
-      // 查看特定用户帖子时不过滤状态和时间
+      // 查看特定用户帖子：本人/管理员可见全部状态（我的发布页需要 closed/sold），
+      // 其他人只能看 active/sold，不泄露 pending/rejected/closed 内容
+      const isOwner = userId > 0 && (req.userId === userId || req.isAdmin);
       let where = userId > 0
-        ? 'WHERE p.user_id = ?'
+        ? (isOwner ? 'WHERE p.user_id = ?' : "WHERE p.user_id = ? AND p.status IN ('active','sold')")
         : "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
       const params: any[] = [];
       if (userId > 0) {
@@ -53,10 +60,25 @@ export function registerPostRoutes(app: any, pool: Pool) {
         params.push(postType);
       }
       if (keyword) {
-        const safeKeyword = keyword.slice(0, 100).replace(/[+\-*()~<>]/g, '').split(/\s+/).filter(Boolean);
-        if (safeKeyword.length > 0) {
+        // ngram parser 适配：中文用短语搜索 +"词"（bigram 分词下 +词* 前缀语义不成立），
+        // 英文/数字保留前缀通配 +word*，单个中文字符（< ngram_token_size=2）退化为 LIKE
+        const terms = keyword.slice(0, 100).replace(/[+\-*()~<>"@]/g, ' ').split(/\s+/).filter(Boolean);
+        const hasCJK = (s: string) => /[一-鿿]/.test(s);
+        const ftTerms: string[] = [];
+        const likeTerms: string[] = [];
+        for (const w of terms) {
+          if (hasCJK(w) && [...w].length < 2) likeTerms.push(w);
+          else if (hasCJK(w)) ftTerms.push(`+"${w}"`);
+          else ftTerms.push(`+${w}*`);
+        }
+        if (ftTerms.length > 0) {
           where += ' AND MATCH(p.title, p.description) AGAINST(? IN BOOLEAN MODE)';
-          params.push(safeKeyword.map(w => `+${w}*`).join(' '));
+          params.push(ftTerms.join(' '));
+        }
+        for (const w of likeTerms) {
+          const escaped = w.replace(/[%_\\]/g, (m) => '\\' + m);
+          where += ' AND (p.title LIKE ? OR p.description LIKE ?)';
+          params.push(`%${escaped}%`, `%${escaped}%`);
         }
       }
 
@@ -67,7 +89,8 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const joinedSelect = `SELECT p.*, u.nickname AS publisher_name, u.avatar_url AS publisher_avatar,
         u.department AS publisher_department, u.org_level AS publisher_org_level,
         u.org_name AS publisher_org_name, u.position AS publisher_position,
-        u.auth_status AS publisher_auth_status
+        u.auth_status AS publisher_auth_status,
+        (CASE WHEN u.gender_visible THEN u.gender ELSE NULL END) AS publisher_gender
         FROM posts p LEFT JOIN users u ON p.user_id = u.id`;
       const [rows]: any = await pool.query(`${joinedSelect} ${where} ${orderBy} LIMIT ? OFFSET ?`, [
         ...params,
@@ -75,7 +98,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
         offset,
       ]);
       const [countRows]: any = await pool.query(`SELECT COUNT(*) as total FROM posts p ${where}`, params);
-      ok(res, { list: rows.map(decryptPost), total: countRows[0].total, page, limit });
+      ok(res, { list: rows.map((r: any) => decryptPost(r, req)), total: countRows[0].total, page, limit });
     } catch (err: any) {
       logger.error('获取帖子列表失败', { error: err.message, trace_id: req._traceId});
       fail(res, 500, '获取帖子列表失败');
@@ -83,20 +106,27 @@ export function registerPostRoutes(app: any, pool: Pool) {
   });
 
   // 详情
-  app.get('/api/v1/posts/:id', async (req: Request, res: Response) => {
+  app.get('/api/v1/posts/:id', optionalAuth, async (req: Request, res: Response) => {
     try {
       const [rows]: any = await pool.query(
         `SELECT p.*, u.nickname AS publisher_name, u.avatar_url AS publisher_avatar,
          u.department AS publisher_department, u.org_level AS publisher_org_level,
          u.org_name AS publisher_org_name, u.position AS publisher_position,
-         u.auth_status AS publisher_auth_status
+         u.auth_status AS publisher_auth_status,
+         (CASE WHEN u.gender_visible THEN u.gender ELSE NULL END) AS publisher_gender
          FROM posts p LEFT JOIN users u ON p.user_id = u.id WHERE p.id = ?`,
         [req.params.id],
       );
       if (rows.length === 0) return notFound(res, '帖子不存在');
+      // pending/rejected/closed 的帖子仅作者本人和管理员可见
+      const post = rows[0];
+      const canSeeHidden = req.userId === post.user_id || req.isAdmin;
+      if (!['active', 'sold'].includes(post.status) && !canSeeHidden) {
+        return notFound(res, '帖子不存在');
+      }
       await pool.query('UPDATE posts SET views = views + 1 WHERE id = ?', [req.params.id]);
-      rows[0].views += 1;
-      ok(res, decryptPost(rows[0]));
+      post.views += 1;
+      ok(res, decryptPost(post, req));
     } catch (err: any) {
       logger.error('获取帖子详情失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId});
       fail(res, 500, '获取帖子详情失败');
@@ -284,7 +314,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
         'SELECT p.* FROM favorites f JOIN posts p ON f.post_id = p.id WHERE f.user_id = ? ORDER BY f.created_at DESC',
         [req.userId],
       );
-      ok(res, rows.map(decryptPost));
+      ok(res, rows.map((r: any) => decryptPost(r, req)));
     } catch (err: any) {
       logger.error('获取收藏失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
       fail(res, 500, '获取收藏失败');

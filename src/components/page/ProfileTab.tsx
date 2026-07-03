@@ -1,14 +1,15 @@
 import { useState, useMemo, useRef } from 'react';
 import { StudentProfile, Listing } from '../../types';
 import { useRegistrations } from '../../utils/regContext';
-import { authApi } from '../../api';
+import { authApi, dmApi } from '../../api';
 import Icon from '../ui/Icon';
+import GenderBadge from '../ui/GenderBadge';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import FeedbackModal from '../modal/FeedbackModal';
+import GradesExamsModal from '../modal/GradesExamsModal';
 
 // ── 类型 ──
-type SubView = null | 'posts' | 'saved' | 'regs';
 
 interface ProfileTabProps {
   profile: StudentProfile;
@@ -16,6 +17,7 @@ interface ProfileTabProps {
   listings: Listing[];
   savedListings: Listing[];
   onAuthClick: () => void;
+  onRescanClick: () => void;
   onLogout: () => void;
   onShowToast: (msg: string, type?: 'success' | 'info') => void;
   onOpenDetail: (l: Listing) => void;
@@ -109,6 +111,10 @@ const DISCLAIMER_SECTIONS = [
 
 // ── 菜单项 ──
 const MENU_ITEMS = [
+  { id: 'grades' as const, icon: 'school', label: '成绩与考试', desc: '扫码登录时自动同步，不用登录教务系统查询' },
+  { id: 'gender' as const, icon: 'person', label: '性别展示', desc: '默认不公开，自己开启后才会在帖子里显示' },
+  { id: 'password' as const, icon: 'lock', label: '修改密码', desc: '扫码登录的会话可免旧密码重设' },
+  { id: 'blocked' as const, icon: 'block', label: '拉黑管理', desc: '查看并解除已拉黑的用户' },
   { id: 'about' as const, icon: 'info', label: '关于 CampusLink', desc: '免责声明与用户协议' },
   { id: 'feedback' as const, icon: 'feedback', label: '问题反馈', desc: '联系管理员，提交反馈和建议' },
 ];
@@ -124,14 +130,96 @@ const COVER_GRADIENTS = [
 // ── 主组件 ──
 export default function ProfileTab({
   profile, savedCount, listings, savedListings,
-  onAuthClick, onLogout, onShowToast, onOpenDetail, onDelete, onStartEdit, onUpdateProfile,
+  onAuthClick, onRescanClick, onLogout, onShowToast, onOpenDetail, onDelete, onStartEdit, onUpdateProfile,
   toggleSaveListing,
 }: ProfileTabProps) {
   const { registrations, myRegIds } = useRegistrations();
-  const [subView, setSubView] = useState<SubView>(null);
   const [regTab, setRegTab] = useState<'mine' | 'joined'>('mine');
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [newPwd2, setNewPwd2] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<{ id: number; nickname: string; avatarUrl: string; blockedAt: string }[] | null>(null);
+  const [unblockBusyId, setUnblockBusyId] = useState<number | null>(null);
+  const [showGradesModal, setShowGradesModal] = useState(false);
+  const [showGenderModal, setShowGenderModal] = useState(false);
+  const [genderDraft, setGenderDraft] = useState<'male' | 'female' | null>(profile.gender);
+  const [genderVisibleDraft, setGenderVisibleDraft] = useState(profile.genderVisible);
+  const [genderBusy, setGenderBusy] = useState(false);
+
+  const openGenderModal = () => {
+    setGenderDraft(profile.gender);
+    setGenderVisibleDraft(profile.genderVisible);
+    setShowGenderModal(true);
+  };
+
+  const handleSaveGender = async () => {
+    if (genderBusy) return;
+    setGenderBusy(true);
+    try {
+      const res = await authApi.updateGender(genderDraft, genderDraft ? genderVisibleDraft : false);
+      if (res.code === 0) {
+        onUpdateProfile((prev) => ({ ...prev, gender: res.data?.gender ?? genderDraft, genderVisible: !!res.data?.genderVisible }));
+        onShowToast('已保存', 'success');
+        setShowGenderModal(false);
+      } else {
+        onShowToast(res.message || '保存失败', 'info');
+      }
+    } catch {
+      onShowToast('网络异常，请重试', 'info');
+    }
+    setGenderBusy(false);
+  };
+
+  // 拉黑管理：会话列表会过滤掉已拉黑用户，这里是唯一的解除入口
+  const openBlockModal = () => {
+    setShowBlockModal(true);
+    setBlockedUsers(null); // null = 加载中
+    dmApi.blockedList().then((res) => {
+      setBlockedUsers(res.code === 0 && Array.isArray(res.data) ? res.data : []);
+    }).catch(() => setBlockedUsers([]));
+  };
+
+  const handleUnblock = async (userId: number) => {
+    if (unblockBusyId !== null) return;
+    setUnblockBusyId(userId);
+    try {
+      const res = await dmApi.unblockUser(userId);
+      if (res.code === 0) {
+        setBlockedUsers((prev) => (prev || []).filter((u) => u.id !== userId));
+        onShowToast('已取消拉黑', 'success');
+      } else {
+        onShowToast(res.message || '操作失败', 'info');
+      }
+    } catch {
+      onShowToast('网络异常，请重试', 'info');
+    }
+    setUnblockBusyId(null);
+  };
+
+  const handleChangePassword = async () => {
+    if (newPwd.length < 6) { onShowToast('新密码至少6位', 'info'); return; }
+    if (newPwd !== newPwd2) { onShowToast('两次输入的新密码不一致', 'info'); return; }
+    if (pwdBusy) return;
+    setPwdBusy(true);
+    try {
+      const res = await authApi.changePassword(newPwd, oldPwd || undefined);
+      if (res.code === 0) {
+        onShowToast('密码已更新', 'success');
+        setShowPwdModal(false);
+        setOldPwd(''); setNewPwd(''); setNewPwd2('');
+      } else {
+        onShowToast(res.message || '修改失败', 'info');
+      }
+    } catch {
+      onShowToast('网络异常，请重试', 'info');
+    }
+    setPwdBusy(false);
+  };
 
   // ── 时间问候 ──
   const greeting = useMemo(() => {
@@ -488,6 +576,7 @@ export default function ProfileTab({
         {/* 姓名 + 认证 */}
         <div className="flex items-center justify-center gap-1.5 flex-wrap">
           <h1 className="font-headline text-lg font-bold text-on-surface">{profile.fullName}</h1>
+          <GenderBadge gender={profile.genderVisible ? profile.gender : null} />
           {profile.isVerified && (
             <span className="inline-flex items-center gap-0.5 bg-course-green/10 text-course-green px-1.5 py-0.5 rounded-full shrink-0">
               <Icon name="verified" className="text-[9px]" /><span className="text-[9px] font-bold">已认证</span>
@@ -609,7 +698,7 @@ export default function ProfileTab({
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           {MENU_ITEMS.map((row, idx) => (
             <button key={row.id}
-              onClick={() => row.id === 'feedback' ? setIsFeedbackOpen(true) : setShowAbout(true)}
+              onClick={() => row.id === 'feedback' ? setIsFeedbackOpen(true) : row.id === 'password' ? setShowPwdModal(true) : row.id === 'blocked' ? openBlockModal() : row.id === 'gender' ? openGenderModal() : row.id === 'grades' ? setShowGradesModal(true) : setShowAbout(true)}
               className={`w-full flex items-center gap-3 py-3 px-4 text-left hover:bg-slate-50 transition-colors cursor-pointer ${
                 idx > 0 ? 'border-t border-gray-50' : ''
               }`}>
@@ -634,6 +723,156 @@ export default function ProfileTab({
 
       {/* 反馈弹窗 */}
       <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} onSuccess={onShowToast} />
+
+      {/* 成绩与考试弹窗 —— 刷新目前的做法是重新走一次扫码登录，同一套流程会顺带重新同步课表/成绩/考试 */}
+      <GradesExamsModal
+        isOpen={showGradesModal}
+        onClose={() => setShowGradesModal(false)}
+        onRefresh={() => { setShowGradesModal(false); onRescanClick(); }}
+      />
+
+      {/* 性别展示弹窗 — 默认不公开，用户自己选了性别 + 打开显示开关才会在帖子/主页展示 */}
+      <Modal
+        isOpen={showGenderModal}
+        onClose={() => setShowGenderModal(false)}
+        title="性别展示"
+        subtitle="不填 / 不开启，别人都看不到"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" size="sm" block onClick={() => setShowGenderModal(false)}>取消</Button>
+            <Button variant="primary" size="sm" block onClick={handleSaveGender} disabled={genderBusy}>
+              {genderBusy ? '保存中…' : '保存'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-2">性别</label>
+            <div className="flex gap-2">
+              {([
+                { value: null, label: '不设置' },
+                { value: 'male' as const, label: '♂ 男' },
+                { value: 'female' as const, label: '♀ 女' },
+              ]).map((opt) => (
+                <button
+                  key={String(opt.value)}
+                  type="button"
+                  onClick={() => setGenderDraft(opt.value)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    genderDraft === opt.value ? 'bg-primary text-white' : 'bg-slate-50 text-gray-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={`flex items-center justify-between gap-3 ${!genderDraft ? 'opacity-40 pointer-events-none' : ''}`}>
+            <div>
+              <span className="block text-xs font-bold text-gray-600">在帖子里显示性别</span>
+              <span className="block text-[10px] text-gray-400 mt-0.5">开启后，首页帖子和校园圈（匿名帖除外）会带上性别标识</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={genderVisibleDraft}
+              onClick={() => setGenderVisibleDraft((v) => !v)}
+              className={`shrink-0 w-11 h-6 rounded-full transition-colors cursor-pointer relative ${genderVisibleDraft ? 'bg-primary' : 'bg-gray-200'}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${genderVisibleDraft ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 修改密码弹窗 */}
+      <Modal
+        isOpen={showPwdModal}
+        onClose={() => setShowPwdModal(false)}
+        title="修改密码"
+        subtitle="忘记旧密码？先用微信扫码登录，再来这里可直接重设"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" size="sm" block onClick={() => setShowPwdModal(false)}>取消</Button>
+            <Button variant="primary" size="sm" block onClick={handleChangePassword} disabled={pwdBusy || newPwd.length < 6 || newPwd !== newPwd2}>
+              {pwdBusy ? '提交中…' : '确认修改'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">旧密码</label>
+            <input
+              type="password"
+              value={oldPwd}
+              onChange={(e) => setOldPwd(e.target.value)}
+              placeholder="扫码登录的会话可留空"
+              autoComplete="current-password"
+              className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">新密码 *</label>
+            <input
+              type="password"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              placeholder="至少6位"
+              autoComplete="new-password"
+              className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">确认新密码 *</label>
+            <input
+              type="password"
+              value={newPwd2}
+              onChange={(e) => setNewPwd2(e.target.value)}
+              placeholder="再输一遍"
+              autoComplete="new-password"
+              className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/10 focus:border-primary focus:outline-none transition-all"
+            />
+          </div>
+          <p className="text-[10px] text-gray-400">修改成功后，其他设备的登录将失效。</p>
+        </div>
+      </Modal>
+
+      {/* 拉黑管理弹窗 — 会话列表不显示已拉黑用户，这里是唯一解除入口 */}
+      <Modal
+        isOpen={showBlockModal}
+        onClose={() => setShowBlockModal(false)}
+        title="拉黑管理"
+        subtitle="拉黑后双方无法互发私信"
+      >
+        {blockedUsers === null ? (
+          <p className="text-xs text-gray-400 text-center py-6">加载中…</p>
+        ) : blockedUsers.length === 0 ? (
+          <p className="text-xs text-gray-400 text-center py-6">没有拉黑任何人</p>
+        ) : (
+          <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+            {blockedUsers.map((u) => (
+              <div key={u.id} className="flex items-center gap-3 p-2 rounded-xl bg-slate-50">
+                {u.avatarUrl ? (
+                  <img src={u.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
+                    <Icon name="person" className="text-gray-400" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{u.nickname || '未知用户'}</p>
+                  <p className="text-[10px] text-gray-400">拉黑于 {u.blockedAt ? new Date(u.blockedAt).toLocaleDateString() : '—'}</p>
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => handleUnblock(u.id)} disabled={unblockBusyId !== null}>
+                  {unblockBusyId === u.id ? '处理中…' : '取消拉黑'}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       {/* 关于弹窗 — 完整免责声明 */}
       <Modal isOpen={showAbout} onClose={() => setShowAbout(false)} title="免责声明与用户协议" subtitle="生效日期：2026年6月23日 · CampusLink 校园信息平台">

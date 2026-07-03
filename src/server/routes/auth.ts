@@ -59,12 +59,16 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           user.nickname = input.fullName;
         }
       } else {
-        // 新用户：AI审核+组织审核
+        // 新用户：一律 pending 待管理员审核。
+        // 安全修复：不再信任客户端上报的 confidence（可伪造直接跳过审核）。
+        // 需要自动认证走教务扫码登录（auth-wechat，教务系统为权威身份源）。
         isNew = true;
         const hash = await bcrypt.hash(input.password, 10);
-        // AI 高置信度 + 无组织 → 自动认证；有组织 → 待管理员人工审核
-        const autoVerified = input.confidence === 'high' && !hasOrg;
-        const initialStatus = autoVerified ? 'verified' : 'pending';
+        if (input.confidence === 'high') {
+          // 服务端 OCR 从不产生 high，出现即为伪造请求，记安全日志
+          logger.security('客户端伪造 confidence=high', { student_id: input.studentId, ip: req.ip, trace_id: req._traceId });
+        }
+        const initialStatus = 'pending';
         const [result]: any = await pool.query(
           "INSERT INTO users (student_id, nickname, auth_status, password_hash, department, org_level, org_name, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           [input.studentId, input.fullName, initialStatus, hash, input.department || null, input.orgLevel || '', input.orgName || '', input.position || ''],
@@ -80,10 +84,10 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           org_name: input.orgName || '',
           position: input.position || '',
         };
-        if (autoVerified) {
-          logger.business('AI自动认证', { user_id: user.id, confidence: input.confidence, trace_id: req._traceId });
-        } else if (hasOrg) {
+        if (hasOrg) {
           logger.business('组织申请待审核', { user_id: user.id, org_level: input.orgLevel, position: input.position, trace_id: req._traceId });
+        } else {
+          logger.business('新用户注册待审核', { user_id: user.id, trace_id: req._traceId });
         }
       }
 
@@ -125,7 +129,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
           is_admin: isAdmin,
           trace_id: req._traceId,
         });
-        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', coverUrl: user.cover_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', orgName: user.org_name || '', position: user.position || '' } });
+        ok(res, { token: accessToken, refresh_token: refreshToken, user: { isAdmin, authStatus: user.auth_status, avatarUrl: user.avatar_url || '', coverUrl: user.cover_url || '', bio: user.bio || '', department: user.department || '', orgLevel: user.org_level || '', orgName: user.org_name || '', position: user.position || '', gender: user.gender || null, genderVisible: !!user.gender_visible } });
       } catch (err: any) {
         await conn.rollback();
         logger.error('认证事务失败', { error: err.message, user_id: user.id, trace_id: req._traceId });
@@ -136,6 +140,37 @@ export function registerAuthRoutes(app: any, pool: Pool) {
     } catch (err: any) {
       logger.error('登录失败', { error: err.message, trace_id: req._traceId });
       fail(res, 500, '登录失败');
+    }
+  });
+
+  // ── 当前用户信息（页面刷新后用 token 恢复登录态） ──
+  app.get('/api/v1/auth/me', auth, limiter(30), async (req: Request, res: Response) => {
+    try {
+      const [rows]: any = await pool.query(
+        'SELECT id, student_id, nickname, auth_status, is_admin, avatar_url, cover_url, bio, department, org_level, org_name, position, gender, gender_visible FROM users WHERE id = ?',
+        [req.userId],
+      );
+      if (rows.length === 0) return notFound(res, '用户不存在');
+      const u = rows[0];
+      ok(res, {
+        id: u.id,
+        studentId: u.student_id,
+        nickname: u.nickname,
+        authStatus: u.auth_status,
+        isAdmin: !!u.is_admin,
+        avatarUrl: u.avatar_url || '',
+        coverUrl: u.cover_url || '',
+        bio: u.bio || '',
+        department: u.department || '',
+        orgLevel: u.org_level || '',
+        orgName: u.org_name || '',
+        position: u.position || '',
+        gender: u.gender || null,
+        genderVisible: !!u.gender_visible,
+      });
+    } catch (err: any) {
+      logger.error('获取当前用户失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
+      fail(res, 500, '获取用户信息失败');
     }
   });
 
@@ -214,13 +249,20 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       if (rows.length === 0) return fail(res, 404, '用户不存在');
 
       if (rows[0].password_hash) {
-        if (!input.oldPassword) return fail(res, 400, '请输入旧密码');
-        const valid = await bcrypt.compare(input.oldPassword, rows[0].password_hash);
-        if (!valid) return fail(res, 401, '旧密码错误');
+        if (!input.oldPassword) {
+          // 密码找回：教务扫码登录的会话（amr=scan）身份已由教务系统权威确认，允许免旧密码重设
+          if (req.authMethod !== 'scan') return fail(res, 400, '请输入旧密码');
+          logger.security('扫码会话免旧密码重设密码', { user_id: req.userId, ip: req.ip, trace_id: req._traceId });
+        } else {
+          const valid = await bcrypt.compare(input.oldPassword, rows[0].password_hash);
+          if (!valid) return fail(res, 401, '旧密码错误');
+        }
       }
 
       const hash = await bcrypt.hash(input.password, 10);
       await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.userId]);
+      // 改密后吊销全部 refresh token（防旧会话继续续期，当前 access token 剩余有效期内仍可用）
+      await pool.query('DELETE FROM refresh_tokens WHERE user_id = ?', [req.userId]).catch(() => {});
       logger.business('密码已修改', { user_id: req.userId, trace_id: req._traceId });
       ok(res, null, '密码设置成功');
     } catch (err: any) {
@@ -305,8 +347,12 @@ export function registerAuthRoutes(app: any, pool: Pool) {
     }
   });
 
-  // ── 更新个人资料（签名等）──
-  const updateProfileSchema = z.object({ bio: z.string().max(80).optional() });
+  // ── 更新个人资料（签名/性别等）──
+  const updateProfileSchema = z.object({
+    bio: z.string().max(80).optional(),
+    gender: z.enum(['male', 'female']).nullable().optional(),
+    genderVisible: z.boolean().optional(),
+  });
   app.put('/api/v1/auth/profile', auth, limiter(10), async (req: Request, res: Response) => {
     try {
       const input = validate(res, updateProfileSchema, req.body);
@@ -314,8 +360,17 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       if (input.bio !== undefined) {
         await pool.query('UPDATE users SET bio = ? WHERE id = ?', [input.bio || null, req.userId]);
       }
+      if (input.gender !== undefined) {
+        await pool.query('UPDATE users SET gender = ? WHERE id = ?', [input.gender, req.userId]);
+      }
+      if (input.genderVisible !== undefined) {
+        await pool.query('UPDATE users SET gender_visible = ? WHERE id = ?', [input.genderVisible, req.userId]);
+      }
       logger.business('个人资料更新', { user_id: req.userId, trace_id: req._traceId });
-      ok(res, { bio: input.bio || '' });
+      // 只传了部分字段时，返回更新后的完整状态，避免前端拿局部响应覆盖出错误状态
+      const [rows]: any = await pool.query('SELECT bio, gender, gender_visible FROM users WHERE id = ?', [req.userId]);
+      const u = rows[0] || {};
+      ok(res, { bio: u.bio || '', gender: u.gender || null, genderVisible: !!u.gender_visible });
     } catch (err: any) {
       logger.error('资料更新失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '更新失败');
@@ -329,7 +384,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
       if (!userId || userId < 1) return fail(res, 400, '无效的用户ID');
 
       const [users]: any = await pool.query(
-        'SELECT id, nickname, avatar_url, cover_url, bio, department, org_level, org_name, position, auth_status, created_at FROM users WHERE id = ?',
+        'SELECT id, nickname, avatar_url, cover_url, bio, department, org_level, org_name, position, auth_status, created_at, gender, gender_visible FROM users WHERE id = ?',
         [userId],
       );
       if (users.length === 0) return notFound(res, '用户不存在');
@@ -354,6 +409,7 @@ export function registerAuthRoutes(app: any, pool: Pool) {
         isVerified: u.auth_status === 'verified',
         activePosts: postCount[0]?.cnt || 0,
         joinedAt: u.created_at?.toISOString().substring(0, 10) || '',
+        gender: u.gender_visible ? (u.gender || null) : null,
       });
     } catch (err: any) {
       logger.error('获取用户信息失败', { error: err.message, trace_id: req._traceId });

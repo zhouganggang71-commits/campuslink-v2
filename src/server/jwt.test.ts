@@ -28,6 +28,16 @@ describe('signAccessToken / verifyAccessToken', () => {
     expect(payload!.admin).toBe(true);
   });
 
+  it('amr 默认应为 password', () => {
+    const payload = verifyAccessToken(signAccessToken(1, false));
+    expect(payload!.amr).toBe('password');
+  });
+
+  it('amr=scan 应完整往返（扫码会话免旧密码重设的依据）', () => {
+    const payload = verifyAccessToken(signAccessToken(1, false, 'scan'));
+    expect(payload!.amr).toBe('scan');
+  });
+
   it('应拒绝过期 token', () => {
     const jwt = require('jsonwebtoken');
     const expired = jwt.sign({ uid: 1, admin: false, type: 'access' }, process.env.JWT_SECRET, { expiresIn: '-1s' });

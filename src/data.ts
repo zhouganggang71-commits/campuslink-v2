@@ -14,6 +14,8 @@ export const INITIAL_PROFILE: StudentProfile = {
   isAdmin: false,
   postsCount: 0,
   savedCount: 0,
+  gender: null,
+  genderVisible: false,
 };
 
 export const INITIAL_NOTICES: Notice[] = [

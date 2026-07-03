@@ -35,4 +35,19 @@ export const dmApi = {
   unreadCount() {
     return request<{ count: number }>('GET', '/conversations/unread-count');
   },
+
+  /** 拉黑用户（双向禁止私信） */
+  blockUser(userId: number) {
+    return request<{ blocked: boolean }>('POST', `/users/${userId}/block`);
+  },
+
+  /** 取消拉黑 */
+  unblockUser(userId: number) {
+    return request<{ blocked: boolean }>('DELETE', `/users/${userId}/block`);
+  },
+
+  /** 我的拉黑列表 */
+  blockedList() {
+    return request<{ id: number; nickname: string; avatarUrl: string; blockedAt: string }[]>('GET', '/users/blocked');
+  },
 };

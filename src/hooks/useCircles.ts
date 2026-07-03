@@ -27,6 +27,8 @@ export interface CirclePost {
   nickname: string;
   auth_status: string;
   is_admin: boolean;
+  avatar_url: string | null;
+  gender: 'male' | 'female' | null;
 }
 
 export function useCircles() {

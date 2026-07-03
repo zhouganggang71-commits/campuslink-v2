@@ -68,6 +68,9 @@ import {
   SendHorizonal,
   Smile,
   Keyboard,
+  Ban,
+  SlidersHorizontal,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { memo } from 'react';
 
@@ -110,8 +113,8 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   chevron_right: ChevronRight,
   chevron_left: ChevronLeft,
   volunteer_activism: Handshake,
-  share: Share2,
-  share_2: Share,
+  share: Share,
+  share_2: Share2,
   document_scanner: Scan,
   scan_text: ScanText,
   scan: ScanText,
@@ -135,6 +138,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   lock: Lock,
   timer: Timer,
   edit_document: FileEdit,
+  edit: FileEdit,
   file_text: FileText,
   apps: LayoutGrid,
   phone: Smartphone,
@@ -155,6 +159,9 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   send: SendHorizonal,
   mood: Smile,
   keyboard: Keyboard,
+  block: Ban,
+  tune: SlidersHorizontal,
+  restaurant: UtensilsCrossed,
 };
 
 function sizeClass(cls: string): number {

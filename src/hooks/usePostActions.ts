@@ -15,7 +15,7 @@ interface PostDataLayer {
   setActiveTab: React.Dispatch<React.SetStateAction<string>>;
   setEditingListing: React.Dispatch<React.SetStateAction<Listing | null>>;
   setCarouselIndex: React.Dispatch<React.SetStateAction<number>>;
-  profile: { fullName: string; avatarUrl: string; isVerified: boolean; department?: string };
+  profile: { fullName: string; avatarUrl: string; isVerified: boolean; department?: string; gender: 'male' | 'female' | null; genderVisible: boolean };
   reportedPostIds: React.MutableRefObject<Set<string>>;
   lastPublishTime: React.MutableRefObject<number>;
   editingListing: Listing | null;
@@ -146,6 +146,7 @@ export function usePostActions(d: PostDataLayer) {
       publisherId: 0,
       publisherName: d.profile.fullName,
       publisherAvatar: d.profile.avatarUrl,
+      publisherGender: d.profile.genderVisible ? d.profile.gender : null,
       isVerifiedStudent: d.profile.isVerified,
       department: d.profile.department as any,
     };

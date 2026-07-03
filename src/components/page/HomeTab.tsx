@@ -5,8 +5,10 @@ import Icon from '../ui/Icon';
 import PostCard from './PostCard';
 import AdBanner from './AdBanner';
 import Button from '../ui/Button';
+import Modal from '../ui/Modal';
 import { CardSkeleton } from '../ui/Skeleton';
 import ScrollToTop from '../ui/ScrollToTop';
+import { getCategoryStyle } from '../../utils/postCategory';
 
 function postTypeLabel(pt: string) {
   return POST_TYPE_CHANNELS.find((p) => p.key === pt)?.label || pt;
@@ -52,7 +54,9 @@ export default function HomeTab({
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
   const [showMine, setShowMine] = useState(false);
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hasExtraFilter = showMine || selectedDept !== 'all';
 
   // ── 下拉刷新 ──
   const [pullDistance, setPullDistance] = useState(0);
@@ -139,11 +143,11 @@ export default function HomeTab({
         <div className="relative w-full">
           <Icon
             name="search"
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 select-none text-base"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant/50 select-none text-base"
           />
           <div
             onClick={onOpenSearch}
-            className="w-full bg-slate-100 text-sm border-0 rounded-xl pl-10 pr-4 py-2.5 text-gray-400 text-xs cursor-pointer"
+            className="w-full bg-black/[0.035] text-sm border-0 rounded-full pl-10 pr-4 py-2.5 text-on-surface-variant/60 text-xs cursor-pointer hover:bg-black/[0.05] transition-colors"
           >
             搜索信息、课程、活动...
           </div>
@@ -176,45 +180,83 @@ export default function HomeTab({
           </div>
         )}
 
-        {/* 分类筛选 */}
-        <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-          {POST_TYPE_CHANNELS.map((ch) => (
-            <button
-              key={ch.key}
-              onClick={() => setSelectedPostType(ch.key)}
-              className={`text-xs font-semibold px-4 py-2 rounded-full border shrink-0 transition-all cursor-pointer ${selectedPostType === ch.key ? 'bg-primary text-white border-primary shadow-sm' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
-            >
-              {ch.label}
-            </button>
-          ))}
+        {/* 分类图标 dock — 图标+小标签常驻单行，不做文字胶囊，视觉更轻；筛选按钮收纳学院/我的发布 */}
+        <div className="flex items-center gap-1">
+          <div className="flex flex-1 min-w-0 justify-between">
+            {POST_TYPE_CHANNELS.map((ch) => {
+              const isAll = ch.key === 'all';
+              const style = isAll
+                ? { text: 'text-on-surface', bg: 'bg-on-surface/8' }
+                : getCategoryStyle(ch.key);
+              const active = selectedPostType === ch.key;
+              return (
+                <button
+                  key={ch.key}
+                  onClick={() => setSelectedPostType(ch.key)}
+                  className="flex flex-col items-center gap-1 cursor-pointer shrink-0 px-1"
+                >
+                  <span
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${active ? `${style.bg} ${style.text}` : 'text-on-surface-variant/50'}`}
+                  >
+                    <Icon name={ch.icon} className="text-base" />
+                  </span>
+                  <span className={`text-[9px] transition-colors ${active ? `${style.text} font-semibold` : 'text-on-surface-variant/60'}`}>
+                    {ch.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => setFilterModalOpen(true)}
+            aria-label="更多筛选"
+            className={`relative shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ml-1 ${hasExtraFilter ? 'bg-primary/10 text-primary' : 'bg-black/[0.035] text-on-surface-variant/60 hover:bg-black/[0.06]'}`}
+          >
+            <Icon name="tune" className="text-sm" />
+            {hasExtraFilter && (
+              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-course-red" />
+            )}
+          </button>
         </div>
 
-        {/* 学院筛选 */}
-        <div className="flex gap-1.5 overflow-x-auto hide-scrollbar pb-1">
-          {currentUserName && (
-            <button
-              onClick={() => setShowMine(!showMine)}
-              className={`text-[10px] font-semibold px-3 py-1 rounded-full border shrink-0 cursor-pointer flex items-center gap-1 ${showMine ? 'bg-primary text-white border-primary' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
-            >
-              <Icon name="person" className="text-[10px]" /> 我的发布
-            </button>
-          )}
-          <button
-            onClick={() => setSelectedDept('all')}
-            className={`text-[10px] font-semibold px-3 py-1 rounded-full border shrink-0 cursor-pointer ${selectedDept === 'all' ? 'bg-on-surface text-white border-on-surface' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
-          >
-            全部学院
-          </button>
-          {DEPARTMENTS.map((d) => (
-            <button
-              key={d}
-              onClick={() => setSelectedDept(d)}
-              className={`text-[10px] font-semibold px-3 py-1 rounded-full border shrink-0 cursor-pointer ${selectedDept === d ? 'bg-on-surface text-white border-on-surface' : 'text-on-surface-variant border-outline-variant hover:border-outline'}`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        {/* 更多筛选 — 学院 / 我的发布，收纳进底部弹层，默认不占据首屏空间 */}
+        <Modal
+          isOpen={filterModalOpen}
+          onClose={() => setFilterModalOpen(false)}
+          position="bottom"
+          title="筛选"
+        >
+          <div className="flex flex-col gap-4 pb-2">
+            {currentUserName && (
+              <button
+                onClick={() => setShowMine(!showMine)}
+                className={`text-xs font-semibold px-3 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 transition-colors w-full ${showMine ? 'bg-primary text-white' : 'bg-black/[0.03] text-on-surface-variant'}`}
+              >
+                <Icon name="person" className="text-xs" /> 只看我的发布
+              </button>
+            )}
+            <div>
+              <p className="text-[11px] text-on-surface-variant/60 font-semibold mb-2">学院</p>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setSelectedDept('all')}
+                  className={`text-[11px] font-semibold px-3 py-1.5 rounded-full cursor-pointer transition-colors ${selectedDept === 'all' ? 'bg-on-surface text-white' : 'bg-black/[0.03] text-on-surface-variant'}`}
+                >
+                  全部学院
+                </button>
+                {DEPARTMENTS.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setSelectedDept(d)}
+                    className={`text-[11px] font-semibold px-3 py-1.5 rounded-full cursor-pointer transition-colors ${selectedDept === d ? 'bg-on-surface text-white' : 'bg-black/[0.03] text-on-surface-variant'}`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
 
         {/* 通知 */}
         {notices.length > 0 && (
@@ -222,7 +264,7 @@ export default function HomeTab({
             {notices.map((n) => (
               <div
                 key={n.id}
-                className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 shrink-0"
+                className="flex items-center gap-2 bg-amber-50 rounded-xl px-3 py-2 shrink-0"
               >
                 <Icon name="megaphone" className="text-amber-600 text-sm shrink-0" />
                 <span className="text-[11px] text-amber-800 font-medium truncate">{n.title}</span>
@@ -236,7 +278,7 @@ export default function HomeTab({
 
         {/* ── 初始加载骨架屏 ── */}
         {showInitialSkeleton && (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-3">
             {[1, 2, 3, 4].map((i) => (
               <CardSkeleton key={i} />
             ))}
@@ -245,19 +287,19 @@ export default function HomeTab({
 
         {/* ── 帖子列表/空态/错误 ── */}
         {listError && listings.length === 0 && !loading ? (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+          <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant/60 gap-3">
             <Icon name="wifi_off" className="text-4xl opacity-60" />
-            <p className="text-xs font-semibold text-gray-500">{listError}</p>
+            <p className="text-xs font-semibold text-on-surface-variant">{listError}</p>
             {onRetry && <Button variant="primary" size="sm" onClick={onRetry}>点击重试</Button>}
           </div>
         ) : !showInitialSkeleton && filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-slate-50 rounded-2xl border border-dashed border-gray-200">
+          <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant/60 bg-black/[0.02] rounded-2xl">
             <Icon name="inbox" className="text-4xl mb-2 opacity-60" />
-            <p className="text-xs font-semibold text-gray-500">暂无内容</p>
+            <p className="text-xs font-semibold text-on-surface-variant">暂无内容</p>
             <Button variant="primary" size="sm" onClick={onPublishTab}>去发布</Button>
           </div>
         ) : (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-3">
             {filtered.map((item) => (
               <PostCard
                 key={item.id}

@@ -49,6 +49,8 @@ export function useAuthActions(d: AuthDataLayer) {
         bio: res.data?.user?.bio || '',
         postsCount: 0,
         savedCount: 0,
+        gender: res.data?.user?.gender || null,
+        genderVisible: !!res.data?.user?.genderVisible,
       };
       // 先持久化 profile，再清其他缓存——避免清完到 useEffect 保存之间的窗口期
       // 导致刷新后 token 有效但 profile 丢失、用户显示为游客。

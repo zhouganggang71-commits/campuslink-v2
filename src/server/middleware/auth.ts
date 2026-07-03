@@ -46,6 +46,7 @@ export function auth(req: Request, res: Response, next: NextFunction) {
   }
   req.userId = user.uid;
   req.isAdmin = user.admin;
+  req.authMethod = user.amr;
 
   const cached = verifiedCache.get(user.uid);
   if (cached && Date.now() - cached.time < CACHE_TTL) {
@@ -66,6 +67,43 @@ export function auth(req: Request, res: Response, next: NextFunction) {
       req.isVerified = false;
       next();
     });
+}
+
+/**
+ * 可选认证：带合法 token 则填充 userId/isAdmin/isVerified，不带或非法则以匿名身份放行。
+ * 用于公开接口按登录态区分返回内容（如帖子联系方式）。
+ */
+export function optionalAuth(req: Request, res: Response, next: NextFunction) {
+  req.userId = undefined as any;
+  req.isAdmin = false;
+  req.isVerified = false;
+
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return next();
+
+  const user = verifyAccessToken(token);
+  if (!user) return next(); // token 非法 → 匿名放行，不报 401
+
+  req.userId = user.uid;
+  req.isAdmin = user.admin;
+  req.authMethod = user.amr;
+
+  const cached = verifiedCache.get(user.uid);
+  if (cached && Date.now() - cached.time < CACHE_TTL) {
+    req.isVerified = cached.verified;
+    return next();
+  }
+
+  pool
+    .query('SELECT auth_status FROM users WHERE id = ?', [user.uid])
+    .then(([rows]: any) => {
+      const status = rows[0]?.auth_status;
+      const ok = status === 'verified' || status === 'org_verified';
+      verifiedCache.set(user.uid, { verified: ok, time: Date.now() });
+      req.isVerified = ok;
+      next();
+    })
+    .catch(() => next());
 }
 
 export function adminAuth(req: Request, res: Response, next: NextFunction) {

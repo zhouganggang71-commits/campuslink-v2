@@ -6,7 +6,8 @@ import { Listing, Course } from './types';
 import { useAppData, clearStorageCache } from './hooks/useAppData';
 import { useAppActions } from './hooks/useAppActions';
 import { useDirectMessages } from './hooks/useDirectMessages';
-import { setSession } from './utils/api';
+import { setSession, getToken } from './utils/api';
+import { authApi } from './api';
 import { INITIAL_PROFILE, POST_TYPE_CHANNELS } from './data';
 import Icon from './components/ui/Icon';
 import Toast from './components/ui/Toast';
@@ -48,6 +49,36 @@ export default function App() {
     onStartChat?: (userId: number) => void;
   } | null>(null);
 
+  // ── 登录态恢复：用 token 从 /auth/me 拉取用户信息重建 profile ──
+  // 场景：①页面刷新后 profile 缓存被 BUILD 清理脚本清掉 ②扫码登录响应缺姓名学号 ③authStatus 变化后保持最新
+  const refreshProfileFromMe = useCallback(() => {
+    if (!getToken()) return;
+    authApi.me().then((res) => {
+      if (res.code !== 0 || !res.data) return; // 失败保持现状（token 过期由 client 自动刷新/清理）
+      const u = res.data;
+      const verified = u.authStatus === 'verified' || u.authStatus === 'org_verified';
+      d.setProfile((prev) => ({
+        ...prev,
+        fullName: u.nickname || prev.fullName,
+        studentId: u.studentId || prev.studentId,
+        department: u.department || prev.department,
+        orgLevel: (u.orgLevel || prev.orgLevel) as typeof prev.orgLevel,
+        orgName: u.orgName || '',
+        position: (u.position || prev.position) as typeof prev.position,
+        avatarUrl: u.avatarUrl || '',
+        coverUrl: u.coverUrl || '',
+        bio: u.bio || '',
+        isVerified: verified,
+        isAdmin: u.isAdmin,
+        gender: u.gender ?? null,
+        genderVisible: !!u.genderVisible,
+      }));
+    }).catch(() => { /* 网络异常保持现状 */ });
+  }, [d.setProfile]);
+
+  // 启动时恢复一次（token 在、profile 可能刚被发版清缓存清掉）
+  useEffect(() => { refreshProfileFromMe(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleWechatLoginSuccess = useCallback((data: { token: string; refresh_token: string; user: any }) => {
     // 复用现有 session 设置逻辑 (和 handleAuth 末尾一致)
     setSession(data.token, data.refresh_token);
@@ -67,13 +98,15 @@ export default function App() {
         .forEach((k) => localStorage.removeItem(k));
     } catch { /* noop */ }
     d.setProfile(newProfile);
+    // 扫码登录响应不含姓名/学号，立即从 /auth/me 补全
+    refreshProfileFromMe();
     // 关闭 AuthModal（如果有打开）
     d.setIsAuthModalOpen(false);
     // 同步数据
     d.syncCourses();
     d.syncPosts();
     d.syncFavorites();
-  }, [d]);
+  }, [d, refreshProfileFromMe]);
 
   const clearListing = useCallback(() => d.setSelectedListing(null), [d.setSelectedListing]);
   const handleProfileClick = useCallback(() => {
@@ -259,6 +292,7 @@ export default function App() {
                 listings={d.userListings}
                 savedListings={d.savedListings}
                 onAuthClick={() => d.setIsAuthModalOpen(true)}
+                onRescanClick={() => setIsWechatLoginOpen(true)}
                 onLogout={() => {
                   setSession(null, null);
                   clearStorageCache();

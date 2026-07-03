@@ -22,6 +22,7 @@ function timeAgo(ts: string) {
 const CIRCLE_NAMES: Record<string, string> = {
   trending: '今天发生', study: '学业互助', sports: '约球约饭',
   hobby: '兴趣社团', treehole: '匿名树洞', career: '毕业就业',
+  exam: '考证考试', food: '美食探店', upgrade: '专升本',
 };
 
 const RANK_MEDALS = ['🥇', '🥈', '🥉'];

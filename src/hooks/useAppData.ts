@@ -161,6 +161,31 @@ export function useAppData() {
                 weekType: c.week_type || 'all',
                 courseType: c.course_type || 'theory',
                 colorClass: c.color_class || 'bg-course-blue text-white',
+                schoolYear: c.school_year ?? null,
+                schoolTerm: c.school_term ?? null,
+                source: c.source || 'manual',
+                campus: c.campus ?? null,
+                classGroup: c.class_group ?? null,
+                classComposition: c.class_composition ?? null,
+                examMethod: c.exam_method ?? null,
+                electiveNote: c.elective_note ?? null,
+                hoursBreakdown: c.hours_breakdown ?? null,
+                weeklyHours: c.weekly_hours ?? null,
+                totalHours: c.total_hours ?? null,
+                credit: c.credit ?? null,
+                weekPattern: c.week_pattern ?? null,
+                // mysql2 对 JSON 列通常已自动解析成数组，但防御性处理一下字符串情况（比如老驱动/手工查询）
+                activeWeeks: Array.isArray(c.active_weeks)
+                  ? c.active_weeks
+                  : (() => {
+                      if (typeof c.active_weeks !== 'string' || !c.active_weeks) return null;
+                      try {
+                        const parsed = JSON.parse(c.active_weeks);
+                        return Array.isArray(parsed) ? parsed : null;
+                      } catch {
+                        return null;
+                      }
+                    })(),
               }) as Course,
           );
           setCourses(serverCourses);
@@ -188,6 +213,7 @@ export function useAppData() {
                 publisherId: p.user_id || 0,
                 publisherName: p.publisher_name || p.nickname || '',
                 publisherAvatar: p.publisher_avatar || '',
+                publisherGender: p.publisher_gender || null,
                 isVerifiedStudent: p.publisher_auth_status === 'verified',
                 isOfficialOrg: p.is_official,
                 orgName: p.org_name || p.publisher_org_name,

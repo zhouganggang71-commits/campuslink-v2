@@ -53,6 +53,8 @@ export interface Listing {
   publisherId: number;
   publisherName: string;
   publisherAvatar: string;
+  /** 发帖人性别 — 仅当对方主动公开时才有值，默认不展示 */
+  publisherGender?: 'male' | 'female' | null;
   isVerifiedStudent: boolean;
   isOfficialOrg: boolean;
   orgName?: string;
@@ -81,6 +83,23 @@ export interface Course {
   colorClass: string;
   note?: string;
   isFinished?: boolean;
+  // ── 学年学期归类 + 对齐教务系统官网信息量（都是可选字段，手动添加的老数据可能没有）──
+  schoolYear?: string | null; // 学年起始年，如 "2026"(代表2026-2027学年)
+  schoolTerm?: string | null; // 学期编码：3=秋季学期 12=春季学期
+  source?: 'manual' | 'ocr' | 'scan_sync';
+  campus?: string | null;
+  classGroup?: string | null; // 教学班
+  classComposition?: string | null; // 教学班组成
+  examMethod?: string | null; // 考核方式
+  electiveNote?: string | null; // 选课备注
+  hoursBreakdown?: string | null; // 课程学时组成
+  weeklyHours?: string | null; // 周学时
+  totalHours?: string | null; // 总学时
+  credit?: string | null; // 学分
+  // zcd 原始格式远比"起始周-结束周"复杂（逗号分隔多段+逐段单双周），weekStart/weekEnd/weekType 装不下，
+  // 有 activeWeeks 时以它为准判断"第N周是否有课"，weekPattern 是官网原文本用于展示
+  weekPattern?: string | null; // 原始周次文本，如 "3-4周,6-11周,13-19周"
+  activeWeeks?: number[] | null; // 解析出的具体周次数组
 }
 
 export interface Message {
@@ -107,6 +126,8 @@ export interface StudentProfile {
   isAdmin: boolean;
   postsCount: number;
   savedCount: number;
+  gender: 'male' | 'female' | null;
+  genderVisible: boolean;
 }
 
 export interface Notice {
