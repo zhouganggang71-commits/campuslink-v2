@@ -3,7 +3,6 @@
  */
 import { Listing, Course, Message, StudentProfile } from '../types';
 import { usePostActions } from './usePostActions';
-import { useAuthActions } from './useAuthActions';
 import { useCourseActions } from './useCourseActions';
 import { useMessageActions } from './useMessageActions';
 
@@ -21,7 +20,6 @@ export function useAppActions(d: {
   selectedListing: Listing | null;
   setSelectedListing: React.Dispatch<React.SetStateAction<Listing | null>>;
   setActiveTab: React.Dispatch<React.SetStateAction<string>>;
-  setIsAuthModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
   editingCourseId: string | null;
   setEditingCourseId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -33,7 +31,6 @@ export function useAppActions(d: {
   setCourseForm: React.Dispatch<React.SetStateAction<any>>;
   editingListing: Listing | null;
   lastPublishTime: React.MutableRefObject<number>;
-  reportedPostIds: React.MutableRefObject<Set<string>>;
   PUBLISH_COOLDOWN: number;
   MAX_POSTS_PER_DAY: number;
   MAX_POSTS_UNVERIFIED: number;
@@ -43,8 +40,8 @@ export function useAppActions(d: {
   syncPosts: () => void;
   syncFavorites: () => void;
 }) {
-  const { toggleSaveListing, openListingDetails, handleDelete, handleCopyContact, handleReport, handleStartEdit, handlePublish } = usePostActions(d);
-  const { handleAuth } = useAuthActions(d);
+  const { toggleSaveListing, openListingDetails, handleDelete, handleCopyContact, handleStartEdit, handlePublish } =
+    usePostActions(d);
   const { handleAddCourse, handleDeleteCourse, handleImportCourses, handleShareSchedule } = useCourseActions(d);
   const { handleMarkMessageRead, handleMarkAllRead, handleDeleteMessage } = useMessageActions(d);
 
@@ -56,13 +53,11 @@ export function useAppActions(d: {
     handleDeleteMessage,
     handleDelete,
     handleCopyContact,
-    handleReport,
     handleStartEdit,
     handlePublish,
     handleAddCourse,
     handleDeleteCourse,
     handleImportCourses,
-    handleAuth,
     handleShareSchedule,
   };
 }

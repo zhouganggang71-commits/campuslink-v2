@@ -2,6 +2,7 @@
  * 校园圈 Tab — 圈子横滑 + 帖子流 + 热度排行 + 发布入口
  */
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { usePullToRefresh, PullIndicator } from '../../hooks/usePullToRefresh';
 import { useCircles } from '../../hooks/useCircles';
 import { getToken } from '../../utils/api';
 import { circlesApi } from '../../api';
@@ -27,29 +28,51 @@ function loadSaved(): Set<number> {
   try {
     const raw = localStorage.getItem('campuslink_circle_saved');
     return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch { return new Set(); }
+  } catch {
+    return new Set();
+  }
 }
 function saveSaved(ids: Set<number>) {
-  try { localStorage.setItem('campuslink_circle_saved', JSON.stringify([...ids])); } catch {}
+  try {
+    localStorage.setItem('campuslink_circle_saved', JSON.stringify([...ids]));
+  } catch {
+    /* 忽略 */
+  }
 }
 
 function loadLiked(): Set<number> {
   try {
     const raw = localStorage.getItem('campuslink_circle_liked');
     return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch { return new Set(); }
+  } catch {
+    return new Set();
+  }
 }
 function saveLiked(ids: Set<number>) {
-  try { localStorage.setItem('campuslink_circle_liked', JSON.stringify([...ids])); } catch {}
+  try {
+    localStorage.setItem('campuslink_circle_liked', JSON.stringify([...ids]));
+  } catch {
+    /* 忽略 */
+  }
 }
 
 export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }: CircleTabProps) {
   const {
-    circles, activeCircle,
-    posts, loading, page, totalPages, goToPage,
-    init, switchCircle, searchPosts,
-    prependPost, updateLikeCount,
-    initialLoaded, initError, retryInit,
+    circles,
+    activeCircle,
+    posts,
+    loading,
+    page,
+    totalPages,
+    goToPage,
+    init,
+    switchCircle,
+    searchPosts,
+    prependPost,
+    updateLikeCount,
+    initialLoaded,
+    initError,
+    retryInit,
   } = useCircles();
 
   const [publishOpen, setPublishOpen] = useState(false);
@@ -58,27 +81,46 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
   const [likedIds, setLikedIds] = useState<Set<number>>(loadLiked);
   const [detailPostId, setDetailPostId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (!initialLoaded) init(); }, [init, initialLoaded]);
+  // ── 下拉刷新 ──
+  const { pullDistance, handleTouchStart, handleTouchMove, handleTouchEnd, PULL_THRESHOLD } = usePullToRefresh({
+    refreshing: loading,
+    onRefresh: init,
+    scrollRef,
+  });
+  const [showSearch, setShowSearch] = useState(false);
+
+  useEffect(() => {
+    if (!initialLoaded) init();
+  }, [init, initialLoaded]);
 
   useEffect(() => {
     if (!getToken()) return;
-    circlesApi.getFavorites().then((res) => {
-      if (res.code === 0 && Array.isArray(res.data)) {
-        setSavedIds(new Set(res.data.map((p: any) => p.id)));
-      }
-    }).catch(() => {});
-    circlesApi.getLikes().then((res) => {
-      if (res.code === 0 && Array.isArray(res.data)) {
-        setLikedIds(new Set(res.data));
-      }
-    }).catch(() => {});
+    circlesApi
+      .getFavorites()
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data)) {
+          setSavedIds(new Set(res.data.map((p: any) => p.id)));
+        }
+      })
+      .catch(() => {});
+    circlesApi
+      .getLikes()
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data)) {
+          setLikedIds(new Set(res.data));
+        }
+      })
+      .catch(() => {});
   }, [initialLoaded]);
 
-  useEffect(() => { saveSaved(savedIds); }, [savedIds]);
-  useEffect(() => { saveLiked(likedIds); }, [likedIds]);
+  useEffect(() => {
+    saveSaved(savedIds);
+  }, [savedIds]);
+  useEffect(() => {
+    saveLiked(likedIds);
+  }, [likedIds]);
 
   // 详情页展示"实时"帖子（随 posts 数组里的点赞/评论数变化同步），而不是打开时的静态快照
   const detailPost = useMemo(
@@ -99,71 +141,87 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
 
   const filteredPosts = posts;
 
-  const handleLike = useCallback(async (postId: number) => {
-    if (isGuest) return showToast('请先登录');
-    const wasLiked = likedIds.has(postId);
-    // 乐观切换 —— 已赞的会显示红心并允许取消，未赞的点一下就赞满，不会无限重复计数
-    setLikedIds((prev) => {
-      const next = new Set(prev);
-      wasLiked ? next.delete(postId) : next.add(postId);
-      return next;
-    });
-    try {
-      const res = await circlesApi.like(postId);
-      if (res.code === 0) {
-        const data = res.data as any;
-        updateLikeCount(postId, data.like_count || 0);
-        setLikedIds((prev) => {
-          const next = new Set(prev);
-          data.liked ? next.add(postId) : next.delete(postId);
-          return next;
-        });
-      } else {
-        setLikedIds((prev) => {
-          const next = new Set(prev);
-          wasLiked ? next.add(postId) : next.delete(postId);
-          return next;
-        });
-      }
-    } catch {
+  const handleLike = useCallback(
+    async (postId: number) => {
+      if (isGuest) return showToast('请先登录');
+      const wasLiked = likedIds.has(postId);
+      // 乐观切换 —— 已赞的会显示红心并允许取消，未赞的点一下就赞满，不会无限重复计数
       setLikedIds((prev) => {
         const next = new Set(prev);
-        wasLiked ? next.add(postId) : next.delete(postId);
+        if (wasLiked) next.delete(postId);
+        else next.add(postId);
         return next;
       });
-    }
-  }, [isGuest, likedIds, updateLikeCount, showToast]);
-
-  const handleSave = useCallback(async (postId: number) => {
-    if (isGuest) return showToast('请先登录');
-    const wasSaved = savedIds.has(postId);
-    setSavedIds((prev) => {
-      const next = new Set(prev);
-      wasSaved ? next.delete(postId) : next.add(postId);
-      return next;
-    });
-    try {
-      const res = await circlesApi.toggleFav(postId);
-      if (res.code !== 0) {
-        setSavedIds((prev) => {
+      try {
+        const res = await circlesApi.like(postId);
+        if (res.code === 0) {
+          const data = res.data as any;
+          updateLikeCount(postId, data.like_count || 0);
+          setLikedIds((prev) => {
+            const next = new Set(prev);
+            if (data.liked) next.add(postId);
+            else next.delete(postId);
+            return next;
+          });
+        } else {
+          setLikedIds((prev) => {
+            const next = new Set(prev);
+            if (wasLiked) next.add(postId);
+            else next.delete(postId);
+            return next;
+          });
+        }
+      } catch {
+        setLikedIds((prev) => {
           const next = new Set(prev);
-          wasSaved ? next.add(postId) : next.delete(postId);
+          if (wasLiked) next.add(postId);
+          else next.delete(postId);
           return next;
         });
       }
-    } catch {
+    },
+    [isGuest, likedIds, updateLikeCount, showToast],
+  );
+
+  const handleSave = useCallback(
+    async (postId: number) => {
+      if (isGuest) return showToast('请先登录');
+      const wasSaved = savedIds.has(postId);
       setSavedIds((prev) => {
         const next = new Set(prev);
-        wasSaved ? next.add(postId) : next.delete(postId);
+        if (wasSaved) next.delete(postId);
+        else next.add(postId);
         return next;
       });
-    }
-  }, [isGuest, savedIds, showToast]);
+      try {
+        const res = await circlesApi.toggleFav(postId);
+        if (res.code !== 0) {
+          setSavedIds((prev) => {
+            const next = new Set(prev);
+            if (wasSaved) next.add(postId);
+            else next.delete(postId);
+            return next;
+          });
+        }
+      } catch {
+        setSavedIds((prev) => {
+          const next = new Set(prev);
+          if (wasSaved) next.add(postId);
+          else next.delete(postId);
+          return next;
+        });
+      }
+    },
+    [isGuest, savedIds, showToast],
+  );
 
-  const handlePublishSuccess = useCallback((post: CirclePost) => {
-    prependPost(post);
-    showToast('发布成功');
-  }, [prependPost, showToast]);
+  const handlePublishSuccess = useCallback(
+    (post: CirclePost) => {
+      prependPost(post);
+      showToast('发布成功');
+    },
+    [prependPost, showToast],
+  );
 
   // 详情页
   if (detailPost) {
@@ -197,7 +255,16 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
             <Icon name="trending_up" className="text-[10px]" />
             热门
           </button>
-          <Button variant="primary" size="sm" onClick={() => { if (isGuest) onAuth(); else setPublishOpen(true); }}>发布</Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              if (isGuest) onAuth();
+              else setPublishOpen(true);
+            }}
+          >
+            发布
+          </Button>
         </div>
       </div>
 
@@ -205,7 +272,10 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
       {showSearch && (
         <div className="px-4 py-2 bg-white border-b border-outline-variant/60 flex items-center gap-2">
           <div className="relative flex-1">
-            <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-sm" />
+            <Icon
+              name="search"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-sm"
+            />
             <input
               type="text"
               value={searchQuery}
@@ -232,7 +302,10 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
             搜索
           </button>
           <button
-            onClick={() => { setShowSearch(false); handleClearSearch(); }}
+            onClick={() => {
+              setShowSearch(false);
+              handleClearSearch();
+            }}
             className="text-[10px] text-gray-500 hover:text-gray-700 px-2 py-1 cursor-pointer"
           >
             取消
@@ -257,7 +330,9 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
                   >
                     <Icon name={c.icon || 'chat'} className="text-base" />
                   </span>
-                  <span className={`text-[9px] whitespace-nowrap transition-colors ${active ? 'text-primary font-semibold' : 'text-on-surface-variant/60'}`}>
+                  <span
+                    className={`text-[9px] whitespace-nowrap transition-colors ${active ? 'text-primary font-semibold' : 'text-on-surface-variant/60'}`}
+                  >
                     {c.name}
                   </span>
                 </button>
@@ -275,12 +350,25 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
       )}
 
       {/* 帖子流 */}
-      <div ref={scrollRef} className="flex-1 px-4 py-3 flex flex-col gap-3 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex-1 px-4 py-3 flex flex-col gap-3 overflow-y-auto"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* ── 下拉刷新指示器 ── */}
+        <PullIndicator pullDistance={pullDistance} PULL_THRESHOLD={PULL_THRESHOLD} refreshing={loading} />
         {initError ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
             <Icon name="wifi_off" className="text-4xl text-gray-300" />
             <p className="text-sm">{initError}</p>
-            <button onClick={retryInit} className="px-4 py-1.5 bg-primary text-white text-xs rounded-full cursor-pointer hover:bg-primary/90 transition-colors">点击重试</button>
+            <button
+              onClick={retryInit}
+              className="px-4 py-1.5 bg-primary text-white text-xs rounded-full cursor-pointer hover:bg-primary/90 transition-colors"
+            >
+              点击重试
+            </button>
           </div>
         ) : !initialLoaded && loading ? (
           <div className="flex flex-col gap-3">
@@ -295,7 +383,14 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
             </div>
             <p className="text-sm font-semibold text-on-surface-variant mb-1">还没有人分享</p>
             <p className="text-[10px] text-on-surface-variant/50 mb-4">成为第一个分享校园生活的人</p>
-            <Button variant="primary" size="sm" onClick={() => { if (isGuest) onAuth(); else setPublishOpen(true); }}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (isGuest) onAuth();
+                else setPublishOpen(true);
+              }}
+            >
               开始分享
             </Button>
           </div>
@@ -325,9 +420,7 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
           </>
         )}
 
-        {initialLoaded && loading && (
-          <div className="text-center py-3 text-[10px] text-gray-400">加载中...</div>
-        )}
+        {initialLoaded && loading && <div className="text-center py-3 text-[10px] text-gray-400">加载中...</div>}
       </div>
 
       <CirclePublishModal
@@ -338,10 +431,7 @@ export default function CircleTab({ showToast, isGuest, onAuth, onViewProfile }:
         onError={(msg) => showToast(msg, 'info')}
       />
 
-      <CircleHotRanking
-        isOpen={hotRankingOpen}
-        onClose={() => setHotRankingOpen(false)}
-      />
+      <CircleHotRanking isOpen={hotRankingOpen} onClose={() => setHotRankingOpen(false)} />
 
       <ScrollToTop containerRef={scrollRef} />
     </div>

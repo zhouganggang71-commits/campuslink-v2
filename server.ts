@@ -5,12 +5,15 @@
  * 模块化架构：每个路由模块独立注册，互不影响。
  * 一个模块初始化失败不会导致整站崩溃。
  */
-import "dotenv/config";
+import "dotenv/config"; // 必须在所有模块之前加载 — 注入 .env 到 process.env
+import "./instrument"; // Sentry 初始化 — 依赖 dotenv
+import crypto from "crypto";
 import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
 import multer from "multer";
+import { env } from "./src/server/envSchema";
 import { logger, installGlobalHandlers, setLogDir } from "./src/utils/logger";
 import { pool } from "./src/server/db";
 import { ok, fail } from "./src/server/response";
@@ -29,6 +32,13 @@ import { registerCircleRoutes } from "./src/server/routes/circles";
 import { registerNoticeRoutes } from "./src/server/routes/notices";
 import { registerMessageRoutes } from "./src/server/routes/messages";
 import { registerAcademicRoutes } from "./src/server/routes/academic";
+import { registerPushRoutes } from "./src/server/routes/push";
+import { registerConfigRoutes } from "./src/server/routes/config";
+import { registerReportRoutes } from "./src/server/routes/reports";
+import { registerContentRoutes } from "./src/server/routes/contents";
+import { registerTransactionRoutes } from "./src/server/routes/transactions";
+import { initPush } from "./src/server/push";
+import { startPushScheduler } from "./src/server/pushScheduler";
 
 // ── 全局错误处理 ──
 installGlobalHandlers();
@@ -46,13 +56,15 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https://images.unsplash.com; connect-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+  const nonce = crypto.randomBytes(16).toString('base64');
+  res.locals.cspNonce = nonce;
+  res.setHeader("Content-Security-Policy", `default-src 'self'; img-src 'self' data: blob: https://images.unsplash.com; connect-src 'self' https://*.ingest.sentry.io; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'`);
   next();
 });
 
 // ── CORS（允许前端域名跨域调用 API） ──
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://jhcaishui.cn:8443',
+  origin: env.CORS_ORIGIN,
   credentials: true,
 }));
 
@@ -101,13 +113,27 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// ── 带 CSP nonce 注入的 index.html 发送 ──
+function sendIndexWithNonce(res: any, filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  let html = fs.readFileSync(filePath, 'utf8');
+  const nonce = res.locals?.cspNonce || '';
+  html = html.replace(/CSP_NONCE/g, nonce);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+  return true;
+}
+
 // ── 静态文件 ──
 const distDir = path.join(process.cwd(), "dist");
 console.log(`[CampusLink] cwd=${process.cwd()} distDir=${distDir} exists=${fs.existsSync(distDir)}`);
 app.use("/assets", express.static(path.join(distDir, "assets"), { maxAge: 31536000000, immutable: true }));
 app.get("/", (req, res, next) => {
   const fp = path.join(distDir, "index.html");
-  if (fs.existsSync(fp)) return res.sendFile(fp);
+  if (sendIndexWithNonce(res, fp)) return;
   next();
 });
 
@@ -137,7 +163,7 @@ const pdfUpload = multer({
 
 // ── 健康检查（含连接池+内存） ──
 const startTime = Date.now();
-const HEALTH_KEY = process.env.HEALTH_KEY || process.env.ADMIN_KEY || '';
+const HEALTH_KEY = env.HEALTH_KEY || env.ADMIN_KEY || '';
 
 app.get("/api/health", async (req, res) => {
   try {
@@ -234,12 +260,14 @@ app.post("/api/ads/:id/click", limiter(30), async (req: any, res: any) => {
   }
 });
 
-// ── API 文档 ──
+// ── API 文档（仅非生产环境开放）──
 app.get('/api/v1/openapi.json', (req, res) => {
+  if (process.env.NODE_ENV === 'production') return fail(res, 404, 'Not found');
   res.json(apiSpec);
 });
 
 app.get('/api-docs', (req, res) => {
+  if (process.env.NODE_ENV === 'production') return fail(res, 404, 'Not found');
   const html = `<!DOCTYPE html>
 <html><head><title>CampusLink API 文档</title>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -283,6 +311,15 @@ safeRegister("circles",       () => registerCircleRoutes(app, pool));
 safeRegister("notices",       () => registerNoticeRoutes(app, pool));
 safeRegister("messages",      () => registerMessageRoutes(app, pool));
 safeRegister("academic",      () => registerAcademicRoutes(app, pool));
+safeRegister("push",          () => { initPush(); registerPushRoutes(app, pool); startPushScheduler(pool); });
+safeRegister("config",        () => registerConfigRoutes(app, pool));
+safeRegister("reports",        () => registerReportRoutes(app, pool));
+safeRegister("contents",       () => registerContentRoutes(app, pool));
+safeRegister("transactions",  () => registerTransactionRoutes(app, pool));
+
+// ── Sentry 错误处理（在所有路由之后、自定义错误处理之前）──
+import * as Sentry from "@sentry/node";
+Sentry.setupExpressErrorHandler(app);
 
 // ── 全局错误处理 ──
 app.use((err: any, req: any, res: any, next: any) => {
@@ -329,12 +366,7 @@ app.get(/^(?!\/api\/|\/uploads\/).*/, (req, res) => {
     return fail(res, 404, "资源不存在，请刷新页面");
   }
   const indexPath = path.join(distDir, "index.html");
-  if (fs.existsSync(indexPath)) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    return res.sendFile(indexPath);
-  }
+  if (sendIndexWithNonce(res, indexPath)) return;
   fail(res, 404, "Not found");
 });
 
@@ -431,8 +463,8 @@ async function runRollback() {
 }
 
 // ── 启动 ──
-const PORT = parseInt(process.env.CAMPUSLINK_PORT || "3002");
-const HOST = process.env.CAMPUSLINK_HOST || "127.0.0.1";
+const PORT = env.CAMPUSLINK_PORT;
+const HOST = env.CAMPUSLINK_HOST;
 
 // ── CLI 命令：迁移回滚 ──
 if (process.argv[2] === 'rollback') {
@@ -450,13 +482,7 @@ if (process.argv[2] === 'rollback') {
 } else {
 
 async function start() {
-  // ── 必需环境变量检查 ──
-  const requiredEnvVars = ['JWT_SECRET', 'CAMPUSLINK_DB_PW', 'ENCRYPTION_KEY'] as const;
-  const missing = requiredEnvVars.filter(k => !process.env[k]);
-  if (missing.length > 0) {
-    logger.error(`缺少必需环境变量: ${missing.join(', ')}`);
-    process.exit(1);
-  }
+  // envSchema.parse 在 import 阶段已验证全部必需变量，此处无需重复检查
 
   try {
     await pool.query("SELECT 1");

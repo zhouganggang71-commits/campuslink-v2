@@ -1,7 +1,7 @@
 /**
  * 活动报名面板 — 懒加载独立组件
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Listing } from '../../types';
 import { useRegistrations } from '../../utils/regContext';
 import Icon from '../ui/Icon';
@@ -28,17 +28,6 @@ export default function RegisterPanel({
     });
     setIsOpen(true);
   };
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isOpen]);
 
   if (listing.postType !== 'activity' || listing.status !== 'active') return null;
 
@@ -71,7 +60,10 @@ export default function RegisterPanel({
       </div>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center animate-fade-in">
-          <div onClick={() => setIsOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity"></div>
+          <div
+            onClick={() => setIsOpen(false)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
+          ></div>
           <div className="relative bg-white w-full max-w-lg rounded-t-[20px] shadow-2xl z-10 px-6 py-6 overflow-y-auto max-h-[80vh]">
             <h3 className="font-headline text-lg font-bold mb-4">活动报名 — {listing.title}</h3>
             <div className="space-y-3">

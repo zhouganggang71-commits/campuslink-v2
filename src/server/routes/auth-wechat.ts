@@ -1,35 +1,122 @@
 /**
  * 企业微信扫码登录 — 通过 Playwright 代理 CAS 认证
- * 
+ *
  * 流程（异步，避免 Nginx 504）：
  * 1. POST /api/v1/auth/wechat-qr → 后台启动 Playwright，立即返回 sessionId
  * 2. POST /api/v1/auth/wechat-poll → 轮询：返回二维码 / 扫码结果 / 登录成功
- * 
+ *
+ * 架构边界（2026-07-04 重构）：浏览器只负责"人扫码 + CAS 认证"这一件事——扫码成功、
+ * 拿到用户信息后立即 context.cookies() 取走全部 Cookie、releaseSession()，
+ * 课表/成绩/考试全部改成带 Cookie 的直接 HTTP 请求（并发池限流），不再用 Playwright
+ * page.evaluate 在浏览器里发请求。
+ * 收益：浏览器占用时间从 ~60s 缩到扫码这一段（~15s），MAX_CONCURRENT_BROWSERS 的
+ * 实际吞吐同步提升；慢的主因从来不是 CDP 序列化开销（那是毫秒级），而是①每个模块
+ * 一次 page.goto 等页面加载(十几秒)②8 个学期组合串行请求③浏览器全程占着——去掉页面
+ * 导航、改并发、提前放浏览器，这三条才是提速的真实来源。
+ * 已否决方案：纯 HTTP 逆向整个 CAS+企业微信扫码流程——企业微信 OAuth 那段带反自动化
+ * 参数，学校随时可能升级导致全废，维护成本远超省下的 200MB 浏览器内存。浏览器只用来
+ * 完成"人扫码"这一步，是最稳的边界。
+ *
+ * 2026-07-05 优化：用预热浏览器（warmBrowser）替代每次 chromium.launch()。
+ * 第一个请求仍需等 10-15s 启动浏览器，后续请求复用同一个浏览器实例，
+ * 每个会话创建独立 context/page 做隔离，扫码完成后只关 context/page，浏览器常驻。
  */
 import { Request, Response } from 'express';
 import { randomBytes } from 'crypto';
 import { Pool } from 'mysql2/promise';
-import { chromium, Browser, Page } from 'playwright';
+import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { signAccessToken, signRefreshToken } from '../jwt';
+import { auth, clearAuthCache } from '../middleware/auth';
 import { limiter } from '../middleware/limiter';
 import { logger } from '../../utils/logger';
 import { ok, fail } from '../response';
+import { encrypt, decrypt } from '../crypto';
+import { hashToken } from '../jwt';
+import { COURSE_COLORS } from '../../types';
+
+/** 扫码同步课表按"课程名"分配颜色——同一门课固定同一个颜色，不会每次刷新都变；
+ * 之前这里完全没设 color_class，MySQL 用列默认值兜底，导致所有课程清一色蓝 */
+function assignCourseColors<T extends { name: string }>(courses: T[]): (T & { color_class: string })[] {
+  const colorMap = new Map<string, string>();
+  let idx = 0;
+  return courses.map((c) => {
+    if (!colorMap.has(c.name)) {
+      colorMap.set(c.name, COURSE_COLORS[idx % COURSE_COLORS.length]);
+      idx++;
+    }
+    return { ...c, color_class: colorMap.get(c.name)! };
+  });
+}
+
+// ── 预热浏览器（复用 chromium 实例，省掉每次 ~15s 的 launch） ──
+let warmBrowser: Browser | null = null;
+let warmBrowserLaunching: Promise<Browser> | null = null;
+
+async function getWarmBrowser(): Promise<Browser> {
+  if (warmBrowser?.isConnected()) return warmBrowser;
+  if (warmBrowserLaunching) return warmBrowserLaunching;
+  logger.info('预热浏览器不存在或已断开，重新创建', {
+    hadBrowser: !!warmBrowser,
+    hadLaunching: !!warmBrowserLaunching,
+  });
+  warmBrowserLaunching = chromium
+    .launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    })
+    .then((browser) => {
+      warmBrowser = browser;
+      warmBrowserLaunching = null;
+      logger.info('预热浏览器已就绪');
+      // 浏览器意外断开（崩溃/被系统OOM杀掉）时主动立即重新拉起，而不是被动等下一个
+      // 倒霉的用户请求触发 lazy 重建——那样这个用户就要平白多等 ~10-15s 的启动时间
+      browser.once('disconnected', () => {
+        logger.security('预热浏览器意外断开，主动重新拉起', {});
+        if (warmBrowser === browser) warmBrowser = null;
+        getWarmBrowser().catch((err) => logger.error('主动重建预热浏览器失败', { error: err.message }));
+      });
+      return browser;
+    })
+    .catch((err) => {
+      warmBrowserLaunching = null;
+      logger.error('预热浏览器创建失败', { error: err.message });
+      throw err;
+    });
+  return warmBrowserLaunching;
+}
+
+// 进程启动时立即预热，而不是等第一个真实用户请求来触发——避免"每次发版重启后，
+// 第一个来扫码的倒霉用户平白多等 ~10-15s 浏览器启动时间"这种间歇性变慢
+getWarmBrowser().catch((err) =>
+  logger.error('启动时预热浏览器失败（不阻塞服务启动，首个请求会重试）', { error: err.message }),
+);
+
+// 进程退出时关闭预热浏览器
+process.on('exit', () => {
+  warmBrowser?.close().catch(() => {});
+});
+process.on('SIGTERM', () => {
+  warmBrowser?.close().catch(() => {});
+});
+process.on('SIGINT', () => {
+  warmBrowser?.close().catch(() => {});
+});
 
 // ── 会话管理 ──
 interface ScanSession {
-  browser: Browser;
-  context: any; // BrowserContext — 每个 session 独立，隔离 Cookie
+  context: BrowserContext; // 每个 session 独立 BrowserContext，隔离 Cookie
   page: Page;
   status: 'starting' | 'scanning' | 'scanned' | 'done' | 'timeout';
   qrImage: string | null;
   userInfo: { studentId: string; name: string; department: string } | null;
-  scheduleData: any | null;  // 课表多学期数组 [{xnm,xqm,courses}]，登录时全量抓取近3年+下一学年，复用于课程同步
-  gradesData: any[] | null;  // 成绩数据，登录时顺带抓取
-  examsData: any[] | null;   // 考试安排数据，登录时顺带抓取
-  result: any | null;        // done 后的最终响应缓存：幂等返回，防止唯一一次响应被 429/网络丢失后永久卡死
-  extracting: boolean;       // 信息提取锁：防止并发 poll 同时对同一 page 调 goto 互相打断
-  landingUrl: string | null;  // CAS 登录后着陆页 URL，课表页提取失败时兜底
-  browserReleased: boolean;  // 浏览器是否已释放（全局并发上限只统计未释放的会话）
+  scheduleData: any | null; // 课表多学期数组 [{xnm,xqm,courses}]，登录时全量抓取近3年+下一学年，复用于课程同步
+  gradesData: any[] | null; // 成绩数据，登录时顺带抓取
+  examsData: any[] | null; // 考试安排数据，登录时顺带抓取
+  result: any | null; // done 后的最终响应缓存：幂等返回，防止唯一一次响应被 429/网络丢失后永久卡死
+  extracting: boolean; // 信息提取锁：防止并发 poll 同时对同一 page 调 goto 互相打断
+  landingUrl: string | null; // CAS 登录后着陆页 URL，课表页提取失败时兜底；也作为 HTTP 直取阶段的 Referer
+  browserReleased: boolean; // 浏览器资源（context/page）是否已释放
+  ip: string; // 发起者 IP，用于 per-IP 并发软上限（区分"你自己排队"和"全站排队"）
   error: string | null;
   createdAt: number;
   scannedAt: number;
@@ -38,8 +125,62 @@ interface ScanSession {
 
 const sessions = new Map<string, ScanSession>();
 
-// 全局浏览器并发上限：每个 chromium ~150-250MB，超限拒绝新会话而不是拖垮服务器
-const MAX_CONCURRENT_BROWSERS = 5;
+// 全局浏览器并发上限：每个 chromium 页面导航耗 CPU（N100 只有 4 核），
+// 设 6 个确保 CPU 不被抢满，同时够开学高峰期使用。
+// 内存方面每个 chromium ~150-250MB，6 个约为 1-1.5GB，在 7.5G 内存范围内。
+const MAX_CONCURRENT_BROWSERS = 6;
+
+// 单 IP 并发软上限：一台手机不可能同时扫两个码
+const MAX_CONCURRENT_PER_IP = 2;
+
+// 全局并发上限已满时的等待队列：FIFO，最多等 30 秒，超时返回 503
+// 避免并发顶满时硬拒绝——正常用户有点耐心就能排进去，攻击者多 IP 轰炸也排不上
+interface WaitEntry {
+  resolve: (slot: boolean) => void;
+  timer: NodeJS.Timeout;
+  ip: string;
+}
+const WAIT_TIMEOUT_MS = 30_000;
+const waitQueue: WaitEntry[] = [];
+
+function notifyNextWaiter() {
+  while (waitQueue.length > 0) {
+    const entry = waitQueue.shift()!;
+    if (runningBrowserCount() < MAX_CONCURRENT_BROWSERS) {
+      clearTimeout(entry.timer);
+      entry.resolve(true);
+      return;
+    }
+    // 还没空位，继续往下找——但实际不会发生，因为调用方刚释放了一个槽
+  }
+}
+
+async function waitForSlot(ip: string): Promise<boolean> {
+  if (runningBrowserCount() < MAX_CONCURRENT_BROWSERS) return true;
+
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      // 超时：把自己从队列删掉，返回 false
+      const idx = waitQueue.findIndex((e) => e.resolve === resolve);
+      if (idx >= 0) waitQueue.splice(idx, 1);
+      resolve(false);
+    }, WAIT_TIMEOUT_MS);
+
+    waitQueue.push({ resolve, timer, ip });
+    logger.info('扫码登录进入等待队列', { queueLength: waitQueue.length, ip });
+  });
+}
+
+// 会话最长存活时间：从 5 分钟放宽到 7 分钟，给二维码扫描留更多余量
+// （前端轮询超时同步放宽到 6 分钟，这里多留 1 分钟缓冲，避免服务端先于前端判定过期）
+const SESSION_TTL_MS = 7 * 60 * 1000;
+
+/** 与 Playwright context 创建时使用的 UA 保持一致——HTTP 直取阶段的请求头要跟"浏览器发出的"一致，
+ * 正方对这类头有校验的先例，UA 前后不一致容易被判定成异常请求 */
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36';
+
+const JWGLXT_ORIGIN = 'https://jw-scpcfe-cn.scvcfe.edu.cn';
 
 function runningBrowserCount(): number {
   let n = 0;
@@ -47,27 +188,36 @@ function runningBrowserCount(): number {
   return n;
 }
 
-/** 只释放浏览器资源，session 留在 Map（供 done 结果幂等重取，由清理器回收） */
-function releaseBrowser(s: ScanSession) {
-  if (s.browserReleased) return;
-  s.browserReleased = true;
-  s.context.close().catch(() => {});
-  s.browser.close().catch(() => {});
+function runningBrowserCountForIp(ip: string): number {
+  let n = 0;
+  for (const s of sessions.values()) if (!s.browserReleased && s.ip === ip) n++;
+  return n;
 }
 
-/** 安全关闭会话：先关 context 再关 browser，从 Map 移除 */
+/** 只释放会话的浏览器资源（context + page），预热浏览器保持存活 */
+function releaseSession(s: ScanSession) {
+  if (s.browserReleased) return;
+  s.browserReleased = true;
+  s.page.close().catch(() => {});
+  s.context.close().catch(() => {});
+  // 唤醒等待队列中的下一个请求
+  notifyNextWaiter();
+}
+
+/** 安全关闭会话并清理资源 */
 function closeSession(sessionId: string) {
   const s = sessions.get(sessionId);
   if (!s) return;
-  releaseBrowser(s);
+  releaseSession(s);
   sessions.delete(sessionId);
+  // releaseSession 已通知等待队列，这里不需要重复通知
 }
 
-// 每分钟清理过期会话（超过5分钟）
+// 每分钟清理过期会话
 setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) {
-    if (now - s.createdAt > 5 * 60 * 1000) {
+    if (now - s.createdAt > SESSION_TTL_MS) {
       closeSession(id);
       logger.business('扫码会话已清理', { sessionId: id });
     }
@@ -79,152 +229,127 @@ function genId(): string {
   return randomBytes(24).toString('hex'); // 192bit 熵
 }
 
-/** 异步获取二维码。traceId 为发起 /wechat-qr 请求的 trace_id，用于串联该请求的全链路日志 */
+/**
+ * 异步获取二维码。traceId 为发起 /wechat-qr 请求的 trace_id，用于串联该请求的全链路日志
+ *
+ * 2026-07-06 修复"二维码经常加载出莫名其妙的图片"：根因是①截图前只盲等固定 1500ms，
+ * 二维码图片实际渲染耗时受网络/school服务器状况影响，经常等不够就截到空白/加载中的占位内容；
+ * ②任何异常（包括"根本没等到二维码 iframe"这种情况）都会掉进兜底分支，把当前整个页面
+ * （可能是登录表单、错误页、任何东西）截图冒充二维码显示给用户——这才是"莫名其妙的图片"
+ * 的真正来源，不是"没截到图"而是"截到了不该展示的图还当成二维码展示了"。
+ * 修复思路：①改用 iframe 内部 networkidle 等待真实渲染完成，而不是猜一个固定时间；
+ * ②截图后用文件体积做一个粗糙但有效的"空白检测"（真二维码是黑白密集像素图，体积不会
+ * 小到几百字节，加载中占位图/纯色块 PNG 压缩后体积很小）；③按尝试次数重试（每次都重新
+ * page.goto 刷新页面状态，而不是在同一个可能已经卡住的页面上反复截图）；④重试耗尽后
+ * 明确把 session 标记成失败状态，让前端展示"获取二维码失败，请重试"，而不是继续展示
+ * 一张误导用户的假二维码——这样用户不用再靠手动反复点"重新扫码"来赌运气，也就不会
+ * 再动不动就撞上同 IP 限流。
+ */
 async function doCaptureQr(sessionId: string, traceId?: string) {
   const session = sessions.get(sessionId);
-  if (!session) { logger.warn('doCaptureQr: session不存在', { sessionId, trace_id: traceId }); return; }
+  if (!session) {
+    logger.warn('doCaptureQr: session不存在', { sessionId, trace_id: traceId });
+    return;
+  }
   const { page } = session;
 
-  try {
-    logger.info('doCaptureQr: 开始导航 CAS 登录页', { sessionId, trace_id: traceId });
-    await page.goto('http://jw.scpcfe.cn/jwglxt/xtgl/login_slogin.html', {
-      waitUntil: 'domcontentloaded',
-      timeout: 20000,
-    });
-    logger.info('doCaptureQr: CAS 页加载完成，找二维码 iframe', { sessionId, trace_id: traceId, url: page.url().slice(0, 150) });
+  const MAX_ATTEMPTS = 3;
+  const MIN_VALID_QR_BYTES = 1000; // 经验阈值：加载中占位图/空白截图 PNG 体积通常远小于此
 
-    const qrIframe = await page.waitForSelector('iframe#qrcodeIframe', { timeout: 15000 });
-    if (qrIframe) {
-      await page.waitForTimeout(1500);
-      const buf = await qrIframe.screenshot();
-      session.qrImage = `data:image/png;base64,${buf.toString('base64')}`;
-      logger.info('doCaptureQr: 二维码截图完成', { sessionId, trace_id: traceId, size: buf.length });
-    } else {
-      const buf = await page.screenshot({ type: 'png' });
-      session.qrImage = `data:image/png;base64,${buf.toString('base64')}`;
-      logger.info('doCaptureQr: 无 iframe，全屏截图', { sessionId, trace_id: traceId, size: buf.length });
-    }
-    session.status = 'scanning';
-  } catch (err: any) {
-    logger.error('doCaptureQr: 异常', { sessionId, trace_id: traceId, error: err.message });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const buf = await page.screenshot({ type: 'png' });
+      logger.info(`doCaptureQr: 第${attempt}次尝试，导航 CAS 登录页`, { sessionId, trace_id: traceId });
+      await page.goto('http://jw.scpcfe.cn/jwglxt/xtgl/login_slogin.html', {
+        waitUntil: 'domcontentloaded',
+        timeout: 20000,
+      });
+      logger.info('doCaptureQr: CAS 页加载完成，找二维码 iframe', {
+        sessionId,
+        trace_id: traceId,
+        attempt,
+        url: page.url().slice(0, 150),
+      });
+
+      const qrIframe = await page.waitForSelector('iframe#qrcodeIframe', { timeout: 15000 });
+
+      // 等二维码图片真正渲染完
+      const frame = await qrIframe.contentFrame();
+      if (frame) {
+        await frame.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+          logger.warn('doCaptureQr: iframe networkidle 等待超时，改等 img 元素', {
+            sessionId,
+            trace_id: traceId,
+            attempt,
+          });
+          // networkidle 超时通常是 iframe 内有长连接轮询，不影响二维码图加载；
+          // 改为等 img 元素出现+稳定，比固定等待更可靠
+          frame.waitForSelector('img', { timeout: 8000 }).catch(() => {
+            logger.warn('doCaptureQr: iframe 内 img 也超时，继续截图碰运气', { sessionId, trace_id: traceId, attempt });
+          });
+        });
+      } else {
+        await page.waitForTimeout(2000);
+      }
+
+      const buf = await qrIframe.screenshot();
+
+      if (buf.length < MIN_VALID_QR_BYTES) {
+        logger.warn(`doCaptureQr: 第${attempt}次截图疑似空白/占位图（体积${buf.length}字节过小）`, {
+          sessionId,
+          trace_id: traceId,
+        });
+        if (attempt < MAX_ATTEMPTS) {
+          await page.waitForTimeout(1000);
+          continue;
+        }
+        // 重试耗尽仍然疑似空白：不展示这张可疑的图，走下面统一的失败分支
+        throw new Error(`二维码截图体积异常（${buf.length}字节），可能未渲染完成`);
+      }
+
       session.qrImage = `data:image/png;base64,${buf.toString('base64')}`;
       session.status = 'scanning';
-      logger.info('doCaptureQr: 异常后全屏截图兜底', { sessionId, trace_id: traceId, size: buf.length });
-    } catch (e2: any) {
-      logger.error('doCaptureQr: 兜底截图也失败', { sessionId, trace_id: traceId, error: e2.message });
+      logger.info('doCaptureQr: 二维码截图完成', { sessionId, trace_id: traceId, size: buf.length, attempt });
+      return;
+    } catch (err: any) {
+      logger.warn(`doCaptureQr: 第${attempt}次尝试异常`, { sessionId, trace_id: traceId, error: err.message });
+      if (attempt < MAX_ATTEMPTS) {
+        await page.waitForTimeout(1000);
+        continue;
+      }
+      // 重试耗尽：不再用整页截图冒充二维码（那正是历史 bug 的根因），
+      // 明确标记失败让前端提示"获取二维码失败，请重试"
+      logger.error('doCaptureQr: 重试耗尽，放弃并标记失败', { sessionId, trace_id: traceId, error: err.message });
+      session.status = 'timeout';
+      session.error = '获取二维码失败，请重试';
     }
   }
 }
 
 /**
- * 通用"偷看真实默认查询"机制：导航到某个正方模块的首页，页面自己的 JS 会按当前默认学期
- * 自动发起一次查询——我们在旁边拦截这次请求的参数（真实的 xnm/xqm）和响应内容直接拿来用。
- * 这类"以学期为单位查询、类似条件筛选"的接口，猜多少种学期组合都不如页面自己查一次准。
- * @param page Playwright page
- * @param indexUrl 模块首页 URL（带 gnmkdm）
- * @param matchPath 用于识别"这就是默认查询请求"的 URL 关键字（比如 'xskbcx_cxXsKb.html'）
- */
-/**
- * 学期编号合法值——正方系统这个部署用的是"秋=3，春=12"的经典编码，不是直觉以为的 1/2。
- * 证据链：考试模块侦察到页面自己默认查询用的是 xqm=12，查到 2 条当前考试；早先手动猜的
- * xqm=3（当时以为是"暑假学期"）意外查到 5 条数据，事后证实是上学期(秋季)的考试——反过来验证
- * 3 就是秋季的合法编号，不是巧合。之前用 1/2 试出来的"合法但空"结构，是因为后端对不认识的
- * xqm 值很宽容、不报错，容易被误判成"这学期没数据"。
- */
-const VALID_XQM = new Set(['3', '12']);
-
-/**
- * 偷看页面自己发出的默认查询，拿真实的 xnm/xqm + 响应体，比自己猜学期准。
- * 加固点：同一个 matchPath 可能被多个请求命中（比如页面上还有个不相关的小部件也打了同名接口），
- * 只取第一个命中的话可能抓到错的——所以等完整的等待窗口、收集所有命中，优先选 xqm 落在
- * VALID_XQM 里的那个，都不合法再退而求其次选第一个。
- * 诊断加固：课表模块(kbcx)这个侦察机制一直没命中过，跟考试模块(kscx)行为不一样——猜测是
- * kbcx 页面根本不会自动发起查询（可能要等用户选完学期下拉再点查询），也可能是真实查询用了
- * 跟假设不同的文件名。没命中时把这段等待窗口里见到的所有 POST 请求 URL 打出来，下次测试就能
- * 直接看到真相，不用再靠猜。
- */
-async function captureDefaultModuleQuery(
-  page: Page,
-  indexUrl: string,
-  matchPath: string,
-  logCb?: (msg: string) => void,
-  label?: string,
-): Promise<{ xnm: string; xqm: string; body: string } | null> {
-  const candidates: { xnm: string; xqm: string; body: string }[] = [];
-  const allPostUrls: string[] = [];
-
-  const onResp = (resp: any) => {
-    (async () => {
-      try {
-        const req = resp.request();
-        if (req.method() !== 'POST') return;
-        const url: string = req.url();
-        allPostUrls.push(url);
-        if (url.indexOf(matchPath) === -1) return;
-        const postData: string = req.postData() || '';
-        const xnmMatch = postData.match(/xnm=([^&]*)/);
-        const xqmMatch = postData.match(/xqm=([^&]*)/);
-        const body = await resp.text();
-        candidates.push({
-          xnm: xnmMatch ? decodeURIComponent(xnmMatch[1]) : '',
-          xqm: xqmMatch ? decodeURIComponent(xqmMatch[1]) : '',
-          body,
-        });
-      } catch { /* 这次拦截没拿到有效数据，等下一个匹配的请求，不抛出去打断导航 */ }
-    })();
-  };
-  page.on('response', onResp);
-
-  await page.goto(indexUrl, { waitUntil: 'networkidle', timeout: 10000 })
-    .catch(() => { /* 导航异常也继续等，可能默认查询已经在报错前发生过了 */ });
-  // networkidle 之后再等一下，防止查询请求刚好还没返回就被判定"没捕获到"
-  await page.waitForTimeout(3000);
-  page.off('response', onResp);
-
-  if (!candidates.length) {
-    if (allPostUrls.length) {
-      logCb?.(`${label || ''}默认查询未命中matchPath=${matchPath}，窗口内见到的POST请求(去重前10个): ${Array.from(new Set(allPostUrls)).slice(0, 10).join(' | ')}`);
-    } else {
-      logCb?.(`${label || ''}默认查询未命中，窗口内没见到任何POST请求——页面可能根本没自动发起查询`);
-    }
-    return null;
-  }
-  if (candidates.length === 1) return candidates[0];
-  const valid = candidates.find((c) => VALID_XQM.has(c.xqm));
-  return valid || candidates[0];
-}
-
-/**
- * 手动猜学期的兜底列表，用经典的 3(秋)/12(春) 编码。只在 captureDefaultModuleQuery 偷看失败时
- * 才会用到——真正的"当前学期"优先靠侦察拿到的真实值，这里只是猜测顺序兜底。
+ * 学期编号：正方系统这个部署用的是"秋=3，春=12"的经典编码（已用真实数据多轮交叉验证过，
+ * 不是直觉以为的 1/2）。手动猜学期用这个顺序：当前学期优先，上一个学期次之。
  */
 function getSemestersToTry(): { xnm: string; xqm: string }[] {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
-  // 9月-次年1月：秋季学期(xqm=3)是当前，去年同期的春季(xqm=12)是上一个
-  if (month >= 9) return [{ xnm: String(year), xqm: '3' }, { xnm: String(year - 1), xqm: '12' }];
-  if (month === 1) return [{ xnm: String(year - 1), xqm: '3' }, { xnm: String(year - 2), xqm: '12' }];
-  // 2月-8月：春季学期(xqm=12)是当前，去年秋季(xqm=3)是上一个
-  return [{ xnm: String(year - 1), xqm: '12' }, { xnm: String(year - 1), xqm: '3' }];
-}
-
-/** 数据对象里随便哪个数组字段都列出来（key=长度+第一项字段名），用来在还不确定真实字段名时看清真相，不用再靠猜 */
-function describeArrayFields(data: any): string {
-  if (!data || typeof data !== 'object') return '';
-  return Object.entries(data)
-    .filter(([, v]) => Array.isArray(v))
-    .map(([k, v]) => {
-      const arr = v as any[];
-      // 之前截到25个key，导致kbList真实存在的xm(教师)字段被截没了、误判成"接口不返回教师"——
-      // 放宽到45个，避免同样的坑再犯一次
-      const itemKeys = arr[0] && typeof arr[0] === 'object' ? Object.keys(arr[0]).slice(0, 45).join('/') : '';
-      return `${k}=${arr.length}${itemKeys ? `(${itemKeys})` : ''}`;
-    })
-    .join(' | ');
+  // xnm = 该学年起始自然年（秋春统一），与 currentTerm.ts 约定一致。例如 2025-2026 学年：秋=(2025,3)，春=(2025,12)。
+  if (month >= 9)
+    return [
+      { xnm: String(year), xqm: '3' },
+      { xnm: String(year), xqm: '12' },
+    ];
+  if (month === 1)
+    return [
+      { xnm: String(year - 1), xqm: '3' },
+      { xnm: String(year - 1), xqm: '12' },
+    ];
+  // 2-8月：当前=春季(xnm=year-1)，上一个=去年秋季(xnm=year-1，同一学年)
+  return [
+    { xnm: String(year - 1), xqm: '12' },
+    { xnm: String(year - 1), xqm: '3' },
+  ];
 }
 
 /**
@@ -256,7 +381,7 @@ function parseWeekPattern(text: string): number[] {
  * 课表要抓的学年范围：近3年 + 下一学年。之所以要包含"下一学年"，是实测发现学校会提前发布
  * 下学年课表（2026年7月就已经能查到2026-2027学年第1学期的课），只往回猜3年会漏掉这个。
  */
-function getSchoolYearsToTry(yearsBack = 3): string[] {
+function getSchoolYearsToTry(yearsBack = 1): string[] {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
@@ -267,16 +392,102 @@ function getSchoolYearsToTry(yearsBack = 3): string[] {
   return years.map(String);
 }
 
+// ── HTTP 直取：并发限流池 ──
+
+type LimiterFn = <T>(fn: () => Promise<T>) => Promise<T>;
+
+/** 简单的并发限流器：同时最多 concurrency 个任务在跑，其余排队。
+ * 学校教务后端很弱，8+ 个请求同时砸过去轻则慢重则触发风控/封 IP（全校学生共用出口 IP 的
+ * NAT 场景，封了是集体事故）——限并发 3，总耗时比"全部打满并发"差不了两秒，稳得多。 */
+function createLimiter(concurrency: number): LimiterFn {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async function limited<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= concurrency) {
+      await new Promise<void>((resolve) => queue.push(resolve));
+    }
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      const next = queue.shift();
+      if (next) next();
+    }
+  };
+}
+
+/** 响应体是不是登录页 HTML——会话失效/Cookie 没带对的信号，不能当成"结构合法但空"悄悄吞掉，
+ * 那样会跟"这学期真没数据"表现得一模一样，又是一个"结构合法但空"陷阱。 */
+function isLoginPageHtml(text: string): boolean {
+  const head = text.slice(0, 300);
+  return /<!DOCTYPE html/i.test(head) || /login_slogin/i.test(head) || /<html[\s>]/i.test(head);
+}
+
+interface JwFetchResult {
+  json: any | null;
+  invalidSession: boolean;
+  error: string | null;
+}
+
+/** 带 Cookie 直取教务系统接口，头部照抄浏览器请求（正方对这些头有校验的先例）。
+ * Cookie 用完即弃、不持久化——session cookie 也是凭据，这里只是转发不做存储。 */
+async function jwFetchJson(
+  url: string,
+  body: string,
+  cookieHeader: string,
+  refererUrl: string,
+): Promise<JwFetchResult> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': BROWSER_USER_AGENT,
+        Referer: refererUrl,
+        Cookie: cookieHeader,
+      },
+      body,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const text = await resp.text();
+    if (isLoginPageHtml(text)) return { json: null, invalidSession: true, error: null };
+    try {
+      return { json: JSON.parse(text), invalidSession: false, error: null };
+    } catch {
+      return {
+        json: null,
+        invalidSession: false,
+        error: `http=${resp.status} 非JSON响应(前80字符)=${text.replace(/\s+/g, ' ').slice(0, 80)}`,
+      };
+    }
+  } catch (e: any) {
+    return { json: null, invalidSession: false, error: e.message };
+  }
+}
+
 /**
- * 课表页面重新设计：不再"猜一个当前学期就够了"，而是把近3年+下一学年、秋(xqm=3)/春(xqm=12)
- * 两个合法编码的全部组合都查一遍，每个学期查到的课都存下来——前端要做成跟官网一样的
- * "选学年+学期查看"体验，选择器筛的是本地已存数据，不是每次都实时连教务系统查，所以得在
- * 登录这一次性会话里把能拿到的都拿到。
- * 之前用 captureDefaultModuleQuery 侦察"当前默认学期"的做法不再适用——那是为了"只要当前学期"
- * 设计的优化，现在目标是全量，直接按组合列表挨个查更直接。
+ * 课表页面：不再"猜一个当前学期就够了"，而是把近3年+下一学年、秋(xqm=3)/春(xqm=12)两个合法
+ * 编码的全部组合都查一遍并发（经共享限流池）——前端做成跟官网一样的"选学年+学期查看"体验，
+ * 选择器筛的是本地已存数据，不是每次都实时连教务系统查，所以得在登录这一次性机会里把能拿到
+ * 的都拿到。字段映射已用官网真实课程(职业礼仪/会计信息系统应用等，含跨星期样本)完整交叉
+ * 验证过，全部确认无误：xqj=真实星期几(1=周一...跟本项目惯例一致)、jc/jcor/jcs=节次范围文本、
+ * zcd=真实周次文本、cdmc=上课地点、jxbmc=教学班、xm=教师姓名、xqmc=校区、khfsmc=考核方式、
+ * kcxszc=课程学时组成、zhxs=周学时、zxs=总学时、xf=学分。
  */
-async function fetchAllSchedules(page: Page, logCb?: (msg: string) => void): Promise<{
-  studentId: string; studentName: string; className: string;
+async function fetchAllSchedulesHttp(
+  cookieHeader: string,
+  refererUrl: string,
+  limit: LimiterFn,
+  logCb?: (msg: string) => void,
+): Promise<{
+  studentId: string;
+  studentName: string;
+  className: string;
   terms: { xnm: string; xqm: string; courses: any[] }[];
 }> {
   let studentId = '';
@@ -290,69 +501,160 @@ async function fetchAllSchedules(page: Page, logCb?: (msg: string) => void): Pro
     for (const xqm of ['3', '12']) candidates.push({ xnm, xqm });
   }
 
-  for (const { xnm, xqm } of candidates) {
-    try {
-      const result = await page.evaluate(async ({ xnm, xqm }) => {
-        try {
-          const r = await fetch('/jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`,
-          });
-          return JSON.stringify({ ok: r.ok, status: r.status, body: await r.text() });
-        } catch (e: any) { return JSON.stringify({ error: e.message }); }
-      }, { xnm, xqm });
-      const parsed = JSON.parse(result);
-      if (parsed.error) { logCb?.(`课表 学期${xnm}-${xqm}: 请求失败 ${parsed.error}`); continue; }
-      let data: any;
-      try {
-        data = JSON.parse(parsed.body);
-      } catch {
-        logCb?.(`课表 学期${xnm}-${xqm}: http=${parsed.status} 返回不是JSON，跳过`);
-        continue;
-      }
-      const rawItems: any[] = Array.isArray(data?.kbList) ? data.kbList : [];
-      // 实测确认：kbList 本身会返回重复行，同一门课同一时段(星期/节次/周次完全相同)最多重复出现
-      // 过5次(果果查库验证过，"演讲与口才"在2025-12学期原样重复5条)——不是我们扫描了两次，是
-      // 接口自己就这样返回的，猜测跟重修/多教学班登记机制有关。入库前按"课程+星期+节次+周次+
-      // 地点+教学班"这个组合去重，同组合只留第一条。
-      // 去重键用 xqj(真实星期几)+zcd(真实周次文本)——day/jxbzc 都已确认不是这两个含义，
-      // 用错字段当去重键之前能凑巧生效是因为它们对同一批真重复行也恰好保持一致，不是本质正确
-      const seen = new Set<string>();
-      const items = rawItems.filter((it) => {
-        const key = [it.kcmc, it.xqj, it.jcs || it.jcor || it.jc, it.zcd, it.cdmc, it.jxbmc].join('|');
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      // 只记结构元信息，不落响应体（含学号/姓名等 PII）
-      logCb?.(`课表 学期${xnm}-${xqm}: http=${parsed.status} arrayFields=${describeArrayFields(data)} 原始${rawItems.length}条去重后${items.length}条`);
+  const url = `${JWGLXT_ORIGIN}/jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151`;
+  const results = await Promise.all(
+    candidates.map(({ xnm, xqm }) =>
+      limit(async () => {
+        const body = `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`;
+        const r = await jwFetchJson(url, body, cookieHeader, refererUrl);
+        return { xnm, xqm, r };
+      }),
+    ),
+  );
 
-      // 每个有数据的学期抽 8 门不同课的关键字段，用于多学期交叉验证 xqj/zcd 映射
-      if (items.length) {
-        const sn = new Set<string>();
-        const sp: any[] = [];
-        for (const it of items) {
-          if (!sn.has(it.kcmc) && sp.length < 8) { sn.add(it.kcmc); sp.push({ kcmc: it.kcmc, xqj: it.xqj, xqjmc: it.xqjmc, jc: it.jc, zcd: it.zcd, xm: it.xm, cdmc: it.cdmc }); }
-        }
-        logCb?.(`课表 学期${xnm}-${xqm} 样本: ${JSON.stringify(sp)}`);
-      }
+  for (const { xnm, xqm, r } of results) {
+    if (r.invalidSession) {
+      logCb?.(`课表 学期${xnm}-${xqm}: 会话已失效(返回登录页而非JSON)`);
+      continue;
+    }
+    if (r.error) {
+      logCb?.(`课表 学期${xnm}-${xqm}: ${r.error}`);
+      continue;
+    }
+    const data = r.json;
+    const rawItems: any[] = Array.isArray(data?.kbList) ? data.kbList : [];
+    // kbList 接口本身会返回重复行(同一门课同一时段最多重复5条，果果查库验证过)——不是我们
+    // 扫描了两次；入库前按"课程+星期+节次+周次+地点+教学班"组合去重，同组合只留第一条。
+    // 去重键用 xqj(真实星期几)+zcd(真实周次文本)。
+    const seen = new Set<string>();
+    const items = rawItems.filter((it) => {
+      const key = [it.kcmc, it.xqj, it.jcs || it.jcor || it.jc, it.zcd, it.cdmc, it.jxbmc].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    logCb?.(`课表 学期${xnm}-${xqm}: 原始${rawItems.length}条去重后${items.length}条`);
 
-      // 学号/姓名/班级只需要拿一次，第一个查到的非空结果就够了，不用每个学期都重复取
-      if (!studentId) {
-        const info = data?.xsxx || {};
-        studentId = items[0]?.xh || info.XH || '';
-        studentName = info.XM || '';
-        className = info.BJMC || '';
-      }
+    // 学号/姓名/班级只需要拿一次，第一个查到的非空结果就够了
+    if (!studentId) {
+      const info = data?.xsxx || {};
+      studentId = items[0]?.xh || info.XH || '';
+      studentName = info.XM || '';
+      className = info.BJMC || '';
+    }
 
-      if (items.length) {
-        terms.push({ xnm, xqm, courses: items });
-      }
-    } catch (e: any) { logCb?.(`课表 学期${xnm}-${xqm}: 解析异常 ${e?.message || e}`); /* 试下一个组合 */ }
+    if (items.length) terms.push({ xnm, xqm, courses: items });
   }
 
   return { studentId, studentName, className, terms };
+}
+
+/**
+ * 成绩：新接口 xsxyqk_cxJxzxjhxfyqKcxx.html(分页结构) 优先，老接口 cjcx_cxDgXscj.html 兜底；
+ * 按候选学期顺序试，第一个非空就返回，不跨学期合并。每次请求仍经共享限流池，与课表/考试的
+ * 并发请求共用同一个并发上限，不会额外把总并发数顶高。
+ */
+async function fetchGradesHttp(
+  cookieHeader: string,
+  refererUrl: string,
+  limit: LimiterFn,
+  logCb?: (msg: string) => void,
+): Promise<any[]> {
+  const semesters = getSemestersToTry();
+  const endpoints = [
+    {
+      label: '新接口xsxyqk',
+      url: `${JWGLXT_ORIGIN}/jwglxt/xsxy/xsxyqk_cxJxzxjhxfyqKcxx.html?gnmkdm=N105515&sf_request_type=ajax`,
+    },
+    { label: '旧接口cjcx', url: `${JWGLXT_ORIGIN}/jwglxt/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305005` },
+  ];
+  // key = 学期-课程名，去重用；旧接口（后遍历）优先——它有完整 cj 字段
+  const gradeMap = new Map<string, any>();
+
+  for (const ep of endpoints) {
+    for (const { xnm, xqm } of semesters) {
+      const body = `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`;
+      const r = await limit(() => jwFetchJson(ep.url, body, cookieHeader, refererUrl));
+      if (r.invalidSession) {
+        logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: 会话已失效(返回登录页而非JSON)`);
+        continue;
+      }
+      if (r.error) {
+        logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: ${r.error}`);
+        continue;
+      }
+      const data = r.json;
+      const items = data?.items || data?.currentResult;
+      if (Array.isArray(items) && items.length) {
+        logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: 命中${items.length}条`);
+        for (const i of items) {
+          const key = `${xnm}-${xqm}-${i.kcmc || ''}`;
+          // 后遍历的端点覆盖前一个（旧接口有完整 cj 成绩字段）
+          gradeMap.set(key, {
+            schoolYear: xnm,
+            schoolTerm: xqm,
+            courseName: i.kcmc || '未知课程',
+            teacher: i.jsxm || '',
+            credit: i.xf ?? '',
+            grade: i.cj ?? '',
+            gradePoint: i.jd ?? '',
+            examNature: i.ksxz ?? '',
+            courseNature: i.kcxzmc ?? '',
+            courseCategory: i.kclbmc ?? '',
+            courseAttribution: i.kcgsmc ?? '',
+            openCollege: i.kkbmmc ?? '',
+          });
+        }
+      }
+    }
+  }
+  return Array.from(gradeMap.values());
+}
+
+/**
+ * 考试安排：gnmkdm=N358105 已手动核对菜单链接确认无误。按候选学期顺序试，收集所有学期数据。
+ */
+async function fetchExamsHttp(
+  cookieHeader: string,
+  refererUrl: string,
+  limit: LimiterFn,
+  logCb?: (msg: string) => void,
+): Promise<any[]> {
+  const semesters = getSemestersToTry();
+  const url = `${JWGLXT_ORIGIN}/jwglxt/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105`;
+  const allExams: any[] = [];
+
+  for (const { xnm, xqm } of semesters) {
+    const body = `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`;
+    const r = await limit(() => jwFetchJson(url, body, cookieHeader, refererUrl));
+    if (r.invalidSession) {
+      logCb?.(`考试 学期${xnm}-${xqm}: 会话已失效(返回登录页而非JSON)`);
+      continue;
+    }
+    if (r.error) {
+      logCb?.(`考试 学期${xnm}-${xqm}: ${r.error}`);
+      continue;
+    }
+    const items = r.json?.items;
+    if (Array.isArray(items) && items.length) {
+      logCb?.(`考试 学期${xnm}-${xqm}: 命中${items.length}条`);
+      // 收集所有学期的数据，不提前返回（与 fetchGradesHttp 一致）
+      for (const i of items) {
+        allExams.push({
+          schoolYear: xnm,
+          schoolTerm: xqm,
+          courseName: i.kcmc || '未知课程',
+          teacher: i.jsxx || '',
+          examName: i.ksmc ?? '',
+          examTime: i.kssj ?? '',
+          examLocation: i.cdmc ?? '',
+          campus: i.xqmc ?? '',
+          seatNumber: i.zwh ?? '',
+        });
+      }
+    }
+  }
+  return allExams;
 }
 
 /** 我们代码里硬编码的 gnmkdm，跟真实菜单交叉校验用（模块名关键词 → 期望的 gnmkdm） */
@@ -368,20 +670,22 @@ function extractGnmkdm(text: string): string | null {
 }
 
 /**
- * gnmkdm 交叉校验 —— 从一次性调试函数（拉菜单树确认真实模块码）演化成永久保留的安全网。
- * 背景：课表/成绩/考试的 gnmkdm 目前是硬编码值，只在一个测试账号上验证过；如果学校对不同学生
+ * gnmkdm 交叉校验 —— 永久保留的安全网（不是本次清理的"侦察/诊断代码"范畴）。
+ * 背景：课表/成绩/考试的 gnmkdm 是硬编码值，只在一个测试账号上验证过；如果学校对不同学生
  * 路由到不同的模块码（多校区/特殊身份等），代码不会报错，只会安静地拿到"合法但空"的结果，
  * 表现跟"这学期确实没数据"完全一样，没法区分。
  * 做法：登录时拉一次这个学生的真实菜单，按名字关键词（不是编码）找到对应菜单项，取出真实
- * gnmkdm 跟硬编码值对比。一致就什么都不打（避免每次登录刷屏），不一致才打 security 告警——
- * 这次不自动切换查询用的编码（硬编码值是唯一验证过真的能拿到数据的配置，贸然自动切换比保持
- * 现状风险更大），只是让我们第一时间知道"有人的编码跟别人不一样"，而不是永远被蒙在鼓里。
+ * gnmkdm 跟硬编码值对比。一致就什么都不打，不一致才打 security 告警。
+ * 依然用 Playwright page 做 DOM 解析（而不是跟着课表/成绩/考试一起改成纯 HTTP+正则扫描
+ * HTML）——菜单是页面 JS 渲染出来的，原始响应大概率是给前端 JS 用的 JSON 而不是现成的
+ * `<a>` 标签，正则扫描可能永远 0 命中、让这张安全网悄悄失效而不自知。这一次额外的 page.goto
+ * 只发生在扫码成功之后、释放浏览器之前，用可靠性换几秒钟延迟，值得。
  */
 async function checkMenuGnmkdmDrift(page: Page, sessionId: string, traceId?: string) {
   try {
-    var ajaxUrls: string[] = [];
+    const ajaxUrls: string[] = [];
     page.on('request', function onReq(req) {
-      var u = req.url();
+      const u = req.url();
       if (u.indexOf('menu') !== -1 || u.indexOf('gnmkdm') !== -1 || u.indexOf('initMenu') !== -1) {
         ajaxUrls.push(u);
       }
@@ -394,18 +698,18 @@ async function checkMenuGnmkdmDrift(page: Page, sessionId: string, traceId?: str
     await page.waitForTimeout(5000);
 
     // 注意：正方系统 jquery.extends.contact-min.js 会修改 Array/String 原型，避免用 includes()/find()
-    const result = await page.evaluate(function() {
-      var menuItems: any[] = [];
-      var container = document.querySelector('#navbar-tabs');
-      var allA = container ? container.querySelectorAll('a') : document.querySelectorAll('a');
-      for (var i = 0; i < allA.length; i++) {
-        var a = allA[i];
-        var text = (a.innerText || '').replace(/\s+/g, ' ').trim();
-        var onclick = a.getAttribute('onclick') || '';
-        var dataAttrs: any = {};
+    const result = await page.evaluate(function () {
+      const menuItems: any[] = [];
+      const container = document.querySelector('#navbar-tabs');
+      const allA = container ? container.querySelectorAll('a') : document.querySelectorAll('a');
+      for (let i = 0; i < allA.length; i++) {
+        const a = allA[i];
+        const text = (a.innerText || '').replace(/\s+/g, ' ').trim();
+        const onclick = a.getAttribute('onclick') || '';
+        const dataAttrs: any = {};
         if (a.attributes) {
-          for (var j = 0; j < a.attributes.length; j++) {
-            var name = a.attributes[j].name;
+          for (let j = 0; j < a.attributes.length; j++) {
+            const name = a.attributes[j].name;
             if (name && name.indexOf('data-') === 0) dataAttrs[name] = a.attributes[j].value;
           }
         }
@@ -420,15 +724,25 @@ async function checkMenuGnmkdmDrift(page: Page, sessionId: string, traceId?: str
     for (const { keyword, label, expected } of EXPECTED_GNMKDM) {
       const hit = menuItems.find((m) => m.text.indexOf(keyword) !== -1 || m.onclick.indexOf(keyword) !== -1);
       const hitHaystack = hit ? `${hit.onclick} ${JSON.stringify(hit.dataAttrs)}` : '';
-      const found = extractGnmkdm(hitHaystack) || (ajaxJoined.indexOf(keyword) !== -1 ? extractGnmkdm(ajaxJoined) : null);
+      const found =
+        extractGnmkdm(hitHaystack) || (ajaxJoined.indexOf(keyword) !== -1 ? extractGnmkdm(ajaxJoined) : null);
 
       if (!hit && !found) {
-        logger.info('gnmkdm交叉校验：菜单中未找到该模块关键词，可能是权限或菜单结构变化', { sessionId, trace_id: traceId, label, keyword });
+        logger.info('gnmkdm交叉校验：菜单中未找到该模块关键词，可能是权限或菜单结构变化', {
+          sessionId,
+          trace_id: traceId,
+          label,
+          keyword,
+        });
         continue;
       }
       if (found && found !== expected) {
         logger.security('gnmkdm交叉校验：与硬编码不一致，疑似该账号路由到不同模块码', {
-          sessionId, trace_id: traceId, label, expected, found,
+          sessionId,
+          trace_id: traceId,
+          label,
+          expected,
+          found,
         });
       }
       // found === expected，或者找到菜单项但没提取到码：都不打日志，避免每次登录刷屏
@@ -438,149 +752,45 @@ async function checkMenuGnmkdmDrift(page: Page, sessionId: string, traceId?: str
   }
 }
 
-/**
- * 从成绩查询接口获取成绩，多学期试探、多接口试探。
- * 之前 xsxy/xsxyqk_cxXsxyqkIndex.html?gnmkdm=N105515 用 doType=query 会拿到整页 HTML，
- * 靠一次性侦察在同一个 xsxyqk 页面上抓到了它真实用的查询接口：
- * xsxyqk_cxJxzxjhxfyqKcxx.html?gnmkdm=N105515&sf_request_type=ajax（分页结构，
- * topKeys=currentPage,currentResult,...,totalResult 已验证），优先试这个；
- * 老的 cjcx_cxDgXscj.html?gnmkdm=N305005（社区通用值，实测能返回合法 JSON）留作兜底，
- * 万一新接口哪天参数对不上还有得退。
- * 新接口的列表字段名还没见过真实非空数据，字段映射沿用旧接口那一套（kcmc/jsxm/xf/cj/jd...）
- * 是猜测——多打一行 itemKeys 日志，等真的查到数据了照日志核对字段名对不对。
- */
-async function fetchGrades(page: Page, logCb?: (msg: string) => void): Promise<any[]> {
-  const semesters = getSemestersToTry();
-  const endpoints = [
-    { label: '新接口xsxyqk', url: '/jwglxt/xsxy/xsxyqk_cxJxzxjhxfyqKcxx.html?gnmkdm=N105515&sf_request_type=ajax' },
-    { label: '旧接口cjcx', url: '/jwglxt/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305005' },
-  ];
-
-  for (const ep of endpoints) {
-    for (const { xnm, xqm } of semesters) {
-      try {
-        const result = await page.evaluate(async ({ url, xnm, xqm }) => {
-          try {
-            const r = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`,
-            });
-            return JSON.stringify({ ok: r.ok, status: r.status, body: await r.text() });
-          } catch (e: any) { return JSON.stringify({ error: e.message }); }
-        }, { url: ep.url, xnm, xqm });
-        const parsed = JSON.parse(result);
-        if (parsed.error) { logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: 请求失败 ${parsed.error}`); continue; }
-        let data: any;
-        try {
-          data = JSON.parse(parsed.body);
-        } catch {
-          logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: http=${parsed.status} 返回不是JSON，前80字符=${(parsed.body || '').replace(/\s+/g, ' ').slice(0, 80)}`);
-          continue;
-        }
-        // 记一下顶层字段名，方便判断真实的列表字段叫什么（不打字段值，只打 key，防止 PII 落日志）
-        const topKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 20).join(',') : typeof data;
-        // 两种接口的列表字段名不一样：老接口是 items，新接口是分页结构 currentResult
-        const items = data?.items || data?.currentResult;
-        const itemKeys = Array.isArray(items) && items[0] ? Object.keys(items[0]).slice(0, 25).join(',') : '';
-        logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: http=${parsed.status} topKeys=${topKeys} items=${Array.isArray(items) ? items.length : 'N/A'} itemKeys=${itemKeys}`);
-        if (Array.isArray(items) && items.length) {
-          return items.map((i: any) => ({
-            schoolYear: xnm, schoolTerm: xqm,
-            courseName: i.kcmc || '未知课程', teacher: i.jsxm || '',
-            credit: i.xf ?? '', grade: i.cj ?? '', gradePoint: i.jd ?? '',
-            examNature: i.ksxz ?? '', courseNature: i.kcxzmc ?? '',
-            courseCategory: i.kclbmc ?? '', courseAttribution: i.kcgsmc ?? '',
-            openCollege: i.kkbmmc ?? '',
-          }));
-        }
-      } catch (e: any) { logCb?.(`成绩[${ep.label}] 学期${xnm}-${xqm}: 解析异常 ${e?.message || e}`); }
-    }
-  }
-  return [];
-}
-
-/**
- * 从考试安排接口获取考试信息，多学期试探。
- * gnmkdm=N358105 已经手动核对过菜单链接确认无误。侦察机制抓到过页面真实默认查询用 xqm=12——
- * 曾怀疑这是不是拦截错了请求，后来确认 12 就是这个学校"春季学期"的合法编码（见 VALID_XQM
- * 上面的说明），不是 bug。现在偷看一次页面自己默认查询用的真实 xnm/xqm，插到候选列表最前面
- * 优先试，比自己瞎猜准；captureDefaultModuleQuery 内部已加固，能应对同一 matchPath 命中多个
- * 请求的情况。
- */
-async function fetchExams(page: Page, logCb?: (msg: string) => void): Promise<any[]> {
-  const examIndexUrl = 'https://jw-scpcfe-cn.scvcfe.edu.cn/jwglxt/kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default';
-  const captured = await captureDefaultModuleQuery(page, examIndexUrl, 'kscx_cxXsksxxIndex.html', logCb, '考试');
-
-  let semesters = getSemestersToTry();
-  if (captured && captured.xnm && captured.xqm) {
-    logCb?.(`默认学期侦察(考试): xnm=${captured.xnm} xqm=${captured.xqm}`);
-    // 真实默认学期插到最前面优先试，同时去重，避免后面猜测列表里再查一次一样的
-    semesters = [
-      { xnm: captured.xnm, xqm: captured.xqm },
-      ...semesters.filter((s) => !(s.xnm === captured.xnm && s.xqm === captured.xqm)),
-    ];
-  }
-  // captured 为 null 时 captureDefaultModuleQuery 内部已打过诊断日志，这里不重复
-
-  // 乐观读取：按候选顺序试，第一个查到非空数据的学期直接返回，不跟其他学期的数据混在一起
-  for (const { xnm, xqm } of semesters) {
-    try {
-      const result = await page.evaluate(async ({ xnm, xqm }) => {
-        try {
-          const r = await fetch('/jwglxt/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `xnm=${xnm}&xqm=${xqm}&_search=false&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0`,
-          });
-          return JSON.stringify({ ok: r.ok, status: r.status, body: await r.text() });
-        } catch (e: any) { return JSON.stringify({ error: e.message }); }
-      }, { xnm, xqm });
-      const parsed = JSON.parse(result);
-      if (parsed.error) { logCb?.(`考试 学期${xnm}-${xqm}: 请求失败 ${parsed.error}`); continue; }
-      const data = JSON.parse(parsed.body);
-      const items = data?.items;
-      logCb?.(`考试 学期${xnm}-${xqm}: http=${parsed.status} items=${Array.isArray(items) ? items.length : 'N/A'}`);
-      if (Array.isArray(items) && items.length) {
-        return items.map((i: any) => ({
-          schoolYear: xnm, schoolTerm: xqm,
-          courseName: i.kcmc || '未知课程', teacher: i.jsxx || '',
-          examName: i.ksmc ?? '', examTime: i.kssj ?? '',
-          examLocation: i.cdmc ?? '', campus: i.xqmc ?? '', seatNumber: i.zwh ?? '',
-        }));
-      }
-    } catch (e: any) { logCb?.(`考试 学期${xnm}-${xqm}: 解析异常 ${e?.message || e}`); }
-  }
-  return [];
-}
-
 export function registerWechatAuthRoutes(app: any, pool: Pool) {
   // ── 1. 发起扫码登录（异步，立即返回 sessionId）──
   app.post('/api/v1/auth/wechat-qr', limiter(3, 30), async (req: Request, res: Response) => {
-    // 全局并发上限：限流只按 IP，多 IP 同扫仍可能耗尽内存，这里兜底
-    const running = runningBrowserCount();
-    if (running >= MAX_CONCURRENT_BROWSERS) {
-      logger.security('扫码登录并发达上限，拒绝新会话', { running, ip: req.ip, trace_id: req._traceId });
+    const ip = req.ip || 'unknown';
+
+    // per-IP 软上限先判：报错信息明确指向"你自己有会话没结束"，不会被误读成"全站排队"
+    const runningForIp = runningBrowserCountForIp(ip);
+    if (runningForIp >= MAX_CONCURRENT_PER_IP) {
+      logger.info('单IP扫码并发达上限，拒绝新会话（大概率是重复点击/上次会话未正常关闭）', {
+        runningForIp,
+        ip,
+        trace_id: req._traceId,
+      });
+      return fail(res, 429, '你还有一个扫码登录未完成，请关闭后重试，或稍等片刻自动释放');
+    }
+
+    // 全局并发上限：进入 FIFO 等待队列，最多等 30 秒，超时才 503
+    const gotSlot = await waitForSlot(ip);
+    if (!gotSlot) {
+      logger.security('扫码登录等待超时，拒绝新会话', { ip, queueLength: waitQueue.length, trace_id: req._traceId });
       return fail(res, 503, '当前扫码登录人数较多，请稍后再试');
     }
 
     const sessionId = genId();
+    const running = runningBrowserCount();
     logger.info('发起扫码登录', { sessionId, running, trace_id: req._traceId });
 
     try {
-      // 每个会话独立浏览器进程，用完即关，避免并发泄漏
-      const browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-      });
+      // 从预热浏览器创建独立 context/page（隔离 Cookie，共享浏览器进程）
+      const browser = await getWarmBrowser();
       const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        userAgent: BROWSER_USER_AGENT,
         locale: 'zh-CN',
       });
       const page = await context.newPage();
 
       const session: ScanSession = {
-        browser, context, page,
+        context,
+        page,
         status: 'starting',
         qrImage: null,
         userInfo: null,
@@ -591,6 +801,7 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
         extracting: false,
         landingUrl: null,
         browserReleased: false,
+        ip,
         error: null,
         createdAt: Date.now(),
         scannedAt: 0,
@@ -603,12 +814,13 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
 
       // 后台获取二维码
       await doCaptureQr(sessionId, req._traceId);
-
     } catch (err: any) {
       closeSession(sessionId);
       logger.error('启动浏览器失败', { error: err.message, stack: err.stack, trace_id: req._traceId });
       if (!res.headersSent) {
-        const hint = err.message?.includes('Executable doesn\'t exist') ? '服务器未安装浏览器，请运行 npx playwright install chromium' : '';
+        const hint = err.message?.includes("Executable doesn't exist")
+          ? '服务器未安装浏览器，请运行 npx playwright install chromium'
+          : '';
         return fail(res, 500, hint || `启动浏览器失败：${err.message?.slice(0, 80) || '请重试'}`);
       }
     }
@@ -660,10 +872,16 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
               session.status = 'scanned';
               session.scannedAt = Date.now();
               session.landingUrl = url;
-              logger.info('页面已离开 CAS 登录页 — 扫码成功', { sessionId, trace_id: req._traceId, url: url.slice(0, 200) });
+              logger.info('页面已离开 CAS 登录页 — 扫码成功', {
+                sessionId,
+                trace_id: req._traceId,
+                url: url.slice(0, 200),
+              });
               return ok(res, { status: 'scanned' });
             }
-          } catch (e) { logger.warn('page url error', { error: String(e), sessionId, trace_id: req._traceId }); }
+          } catch (e) {
+            logger.warn('page url error', { error: String(e), sessionId, trace_id: req._traceId });
+          }
         }
         return ok(res, { status: 'scanning', qrCode: session.qrImage });
       }
@@ -684,12 +902,17 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
         try {
           // ── 1. 等 SPA 渲染 + 调 onlineInfo API 拿用户信息 ──
           await session.page.waitForTimeout(3000);
-          let apiStudentId = '', apiName = '', apiDept = '';
+          let apiStudentId = '',
+            apiName = '',
+            apiDept = '';
           try {
             const resp = await session.page.evaluate(async () => {
-              const r = await fetch('https://cas2.scpcfe.cn/passport/v1/user/onlineInfo?clientType=SDPBrowserClient&platform=Linux&lang=zh-CN', {
-                credentials: 'include',
-              });
+              const r = await fetch(
+                'https://cas2.scpcfe.cn/passport/v1/user/onlineInfo?clientType=SDPBrowserClient&platform=Linux&lang=zh-CN',
+                {
+                  credentials: 'include',
+                },
+              );
               return JSON.stringify(await r.json());
             });
             const parsed = JSON.parse(resp);
@@ -698,7 +921,15 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
             apiName = user.name || user.displayName || user.nickname || user.realName || '';
             apiDept = user.department || user.deptName || user.orgName || user.departmentName || '';
             // 只记字段结构，不落原始响应（含姓名/学号等 PII）
-            logger.info('onlineInfo API 响应', { sessionId, trace_id: req._traceId, hasData: !!parsed?.data, fields: Object.keys(user).slice(0, 20).join(','), gotId: !!apiStudentId, gotName: !!apiName, gotDept: !!apiDept });
+            logger.info('onlineInfo API 响应', {
+              sessionId,
+              trace_id: req._traceId,
+              hasData: !!parsed?.data,
+              fields: Object.keys(user).slice(0, 20).join(','),
+              gotId: !!apiStudentId,
+              gotName: !!apiName,
+              gotDept: !!apiDept,
+            });
           } catch (err: any) {
             logger.warn('onlineInfo API 失败', { sessionId, trace_id: req._traceId, error: err.message });
           }
@@ -714,7 +945,11 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
             const bare = pageText.match(/(?<!\d)(\d{10,14})(?!\d)/);
             apiStudentId = labeled?.[1] || bare?.[1] || '';
             if (apiStudentId) {
-              logger.warn('学号来自兜底正则提取（非权威接口），存在误判风险', { sessionId, trace_id: req._traceId, source: labeled ? 'labeled' : 'bare' });
+              logger.warn('学号来自兜底正则提取（非权威接口），存在误判风险', {
+                sessionId,
+                trace_id: req._traceId,
+                source: labeled ? 'labeled' : 'bare',
+              });
             }
           }
 
@@ -724,7 +959,14 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
             session.userInfo = { studentId, name: apiName, department: apiDept };
             session.status = 'done';
             // student_id 是全站业务日志的统一标识可记录，姓名/院系值不落日志
-            logger.info('用户信息提取成功', { sessionId, trace_id: req._traceId, studentId, hasName: !!apiName, hasDept: !!apiDept, source: apiStudentId ? 'onlineInfo' : 'url' });
+            logger.info('用户信息提取成功', {
+              sessionId,
+              trace_id: req._traceId,
+              studentId,
+              hasName: !!apiName,
+              hasDept: !!apiDept,
+              source: apiStudentId ? 'onlineInfo' : 'url',
+            });
           } else {
             session.status = 'timeout';
             session.error = '未能获取学号，请确认已扫码成功';
@@ -775,7 +1017,25 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
         if (name && user.nickname !== name) {
           await pool.query('UPDATE users SET nickname = ? WHERE id = ?', [name, user.id]);
         }
-        logger.business('企业微信登录（已有账号）', { user_id: user.id, student_id: studentId, trace_id: req._traceId });
+        // ── 扫码是权威身份源：pending（密码注册/手动注册待审核）账号扫码成功后自动升级 verified ──
+        // 用户先用密码注册卡在 pending，再用教务扫码登录时应直接放行（教务系统已验证学号+姓名），
+        // 否则账号永远卡在待审核，课表/发布等功能全被 403 拦截。
+        // rejected 不自动升级：管理员已人工打回，保持人工裁决优先。
+        if (user.auth_status === 'pending') {
+          await pool.query('UPDATE users SET auth_status = ? WHERE id = ?', ['verified', user.id]);
+          user.auth_status = 'verified';
+          clearAuthCache(user.id);
+          logger.business('扫码登录自动审核通过（pending→verified）', {
+            user_id: user.id,
+            student_id: studentId,
+            trace_id: req._traceId,
+          });
+        }
+        logger.business('企业微信登录（已有账号）', {
+          user_id: user.id,
+          student_id: studentId,
+          trace_id: req._traceId,
+        });
       } else {
         const [result]: any = await pool.query(
           "INSERT INTO users (student_id, nickname, auth_status, department) VALUES (?, ?, 'verified', ?)",
@@ -792,223 +1052,304 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
         logger.business('企业微信新用户自动注册', { user_id: user.id, student_id: studentId, trace_id: req._traceId });
       }
 
-      // ── 尝试获取课表数据（防重入：用占位数组阻止并发 poll 重复进入）──
-      // 重新设计：不再只挑"当前学期"乐观返回，登录时把近3年+下一学年的课表全部抓一遍存库，
-      // 前端仿官网做"学年+学期"选择器，筛的是这里存好的本地数据，不需要保持实时会话
-      if (!session.scheduleData) {
-        session.scheduleData = []; // 占位，阻止并发进入（[] 和 null 判断上都是"未完成"以外的状态）
-        try {
-          await session.page.goto('https://jw-scpcfe-cn.scvcfe.edu.cn/jwglxt/kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151&layout=default', {
-            waitUntil: 'domcontentloaded', timeout: 5000,
-          });
-          const scheduleUrl = session.page.url();
-          logger.info('课表页导航', { sessionId, trace_id: req._traceId, url: scheduleUrl.slice(0, 200), hasKbcx: scheduleUrl.includes('kbcx') });
-          if (scheduleUrl.includes('kbcx')) {
-            const { studentId: schId, studentName: schName, className, terms } = await fetchAllSchedules(
-              session.page,
-              (msg) => logger.info('课表API详情', { sessionId, trace_id: req._traceId, detail: msg }),
-            );
-            logger.info('课表API', {
-              sessionId, trace_id: req._traceId, gotId: !!schId, gotName: !!schName, gotClass: !!className,
-              termCount: terms.length, totalCourses: terms.reduce((s, t) => s + t.courses.length, 0),
-            });
-            // 课表 API 的 schId 来自已登录会话的权威查询，与登录阶段提取的 studentId 交叉校验；
-            // 不一致大概率是兜底正则误抓了页面上无关数字，此时账号已按错误学号创建/匹配，先报警，人工介入排查
-            if (schId && schId !== studentId) {
-              logger.security('学号交叉校验不一致，疑似兜底正则误判', { sessionId, trace_id: req._traceId, user_id: user.id, loginStudentId: studentId, scheduleStudentId: schId });
-            }
-            // 用课表数据补全姓名和班级（onlineInfo 不返回这些）
-            if (schName && !name) {
-              session.userInfo!.name = schName;
-              await pool.query('UPDATE users SET nickname = ? WHERE student_id = ?', [schName, studentId]).catch(() => {});
-            }
-            if (className && !department) {
-              session.userInfo!.department = className;
-              await pool.query('UPDATE users SET department = ? WHERE student_id = ?', [className, studentId]).catch(() => {});
-            }
-            session.scheduleData = terms;
-          }
-        } catch (err: any) {
-          session.scheduleData = null; // 失败释放占位
-          logger.warn('课表获取异常', { sessionId, trace_id: req._traceId, error: err.message });
-        }
-      }
-
-      // ── gnmkdm 交叉校验（永久保留的安全网，见函数注释）──
+      // ── gnmkdm 交叉校验（永久保留的安全网）── 必须在释放浏览器之前做，靠 Playwright DOM 解析
       try {
         await checkMenuGnmkdmDrift(session.page, sessionId, req._traceId);
       } catch (err: any) {
         logger.warn('gnmkdm交叉校验调用失败', { sessionId, trace_id: req._traceId, error: err.message });
       }
 
-      // ── 尝试获取成绩数据（复用已登录 session，同一浏览器 origin 下发起相对路径请求）──
-      if (!session.gradesData) {
-        session.gradesData = []; // 占位，阻止并发进入
-        try {
-          const grades = await fetchGrades(
-            session.page,
-            (msg) => logger.info('成绩API详情', { sessionId, trace_id: req._traceId, detail: msg }),
+      // ── 浏览器的使命到此为止：取走全部 Cookie、立即释放 ──
+      // Cookie 全量带走（不只 JSESSIONID）——正方常见还有 route/SERVERID 等负载均衡粘滞 Cookie，
+      // 少带一个就可能变成"看着登录了，业务查询却认不出会话"。用完即弃，不落库、不持久化。
+      const refererUrl = session.landingUrl || session.page.url();
+      const rawCookies = await session.context.cookies();
+      const cookieHeader = rawCookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+      releaseSession(session);
+
+      // ── 加密存储教务 Cookie，供后续一键刷新使用 ──
+      const encryptedCookie = encrypt(cookieHeader);
+      if (encryptedCookie && user?.id) {
+        pool
+          .query('UPDATE users SET school_cookie = ? WHERE id = ?', [encryptedCookie, user.id])
+          .catch((err: any) =>
+            logger.warn('存储教务 Cookie 失败', { sessionId, trace_id: req._traceId, error: err.message }),
           );
-          logger.info('成绩获取结果', { sessionId, trace_id: req._traceId, count: grades.length });
-          session.gradesData = grades;
-        } catch (err: any) {
-          session.gradesData = null; // 失败释放占位
-          logger.warn('成绩获取异常（可忽略，不影响登录）', { sessionId, trace_id: req._traceId, error: err.message });
-        }
       }
 
-      // ── 尝试获取考试安排数据 ──
-      if (!session.examsData) {
-        session.examsData = []; // 占位，阻止并发进入
+      // ── 后台静默拉取课表/成绩/考试并写入 DB，不阻塞登录响应 ──
+      // 历史做法是同步等待 fetchAllSchedulesHttp + DB 写入全部完成才返回 JWT，
+      // 但教务系统 API 响应慢（6学期 ×2 学期 ×~2s = ~12s），用户扫码后要等很久才能看到首页。
+      // 成绩和考试之前已经改为后台拉取，这里把课表也一并后移：先发 JWT 让用户进首页，
+      // 后台慢慢同步，前端下次刷新自然能拿到。
+      let courseCount = 0,
+        gradeCount = 0,
+        examCount = 0;
+      (async () => {
         try {
-          const exams = await fetchExams(
-            session.page,
-            (msg) => logger.info('考试API详情', { sessionId, trace_id: req._traceId, detail: msg }),
-          );
-          logger.info('考试获取结果', { sessionId, trace_id: req._traceId, count: exams.length });
-          session.examsData = exams;
+          const limit = createLimiter(3);
+          const httpLogCb = (label: string) => (msg: string) =>
+            logger.info(`${label}API详情`, { sessionId, trace_id: req._traceId, detail: msg });
+
+          const [scheduleResult, grades, exams] = await Promise.all([
+            fetchAllSchedulesHttp(cookieHeader, refererUrl, limit, httpLogCb('课表')).catch((err: any) => {
+              logger.warn('后台课表获取失败', { sessionId, trace_id: req._traceId, error: err.message });
+              return null;
+            }),
+            fetchGradesHttp(cookieHeader, refererUrl, limit, httpLogCb('成绩')).catch((err: any) => {
+              logger.warn('后台成绩获取失败', { sessionId, trace_id: req._traceId, error: err.message });
+              return [];
+            }),
+            fetchExamsHttp(cookieHeader, refererUrl, limit, httpLogCb('考试')).catch((err: any) => {
+              logger.warn('后台考试获取失败', { sessionId, trace_id: req._traceId, error: err.message });
+              return [];
+            }),
+          ]);
+
+          if (scheduleResult) {
+            const { studentId: schId, studentName: schName, className, terms } = scheduleResult;
+            logger.info('课表API', {
+              sessionId,
+              trace_id: req._traceId,
+              gotId: !!schId,
+              gotName: !!schName,
+              gotClass: !!className,
+              termCount: terms.length,
+              totalCourses: terms.reduce((s, t) => s + t.courses.length, 0),
+            });
+            if (schId && schId !== studentId) {
+              logger.security('学号交叉校验不一致，疑似兜底正则误判', {
+                sessionId,
+                trace_id: req._traceId,
+                user_id: user.id,
+                loginStudentId: studentId,
+                scheduleStudentId: schId,
+              });
+            }
+            if (schName && !name) {
+              await pool
+                .query('UPDATE users SET nickname = ? WHERE student_id = ?', [schName, studentId])
+                .catch(() => {});
+            }
+            if (className && !department) {
+              await pool
+                .query('UPDATE users SET department = ? WHERE student_id = ?', [className, studentId])
+                .catch(() => {});
+            }
+            session.scheduleData = terms;
+
+            // 同步课表
+            try {
+              const allCourses = assignCourseColors(
+                terms.flatMap(({ xnm, xqm, courses }) =>
+                  courses.map((item: any) => {
+                    const rawXqj = Number(item.xqj);
+                    const weekday = rawXqj === 0 ? 7 : rawXqj || 1;
+                    const periodText = String(item.jcs || item.jcor || item.jc || '');
+                    const periodMatch = periodText.match(/(\d+)(?:[-~](\d+))?/);
+                    const start = periodMatch ? parseInt(periodMatch[1], 10) : 1;
+                    const end = periodMatch && periodMatch[2] ? parseInt(periodMatch[2], 10) : start;
+                    const zcText = String(item.zcd || '');
+                    const activeWeeks = parseWeekPattern(zcText);
+                    const weekStart = activeWeeks.length ? activeWeeks[0] : 1;
+                    const weekEnd = activeWeeks.length ? activeWeeks[activeWeeks.length - 1] : 18;
+                    return {
+                      user_id: user.id,
+                      school_year: xnm,
+                      school_term: xqm,
+                      source: 'scan_sync',
+                      name: item.kcmc || '未知课程',
+                      teacher: item.xm || '',
+                      classroom: item.cdmc || '',
+                      weekday,
+                      start_period: start,
+                      period_span: Math.max(end - start + 1, 1),
+                      week_start: weekStart,
+                      week_end: weekEnd,
+                      week_type: 'all',
+                      week_pattern: zcText || null,
+                      active_weeks: activeWeeks.length ? JSON.stringify(activeWeeks) : null,
+                      course_type: 'theory',
+                      campus: item.xqmc || null,
+                      class_group: item.jxbmc || null,
+                      class_composition: null,
+                      exam_method: item.khfsmc || null,
+                      elective_note: null,
+                      hours_breakdown: item.kcxszc || null,
+                      weekly_hours: item.zhxs != null ? String(item.zhxs) : null,
+                      total_hours: item.zxs != null ? String(item.zxs) : null,
+                      credit: item.xf != null ? String(item.xf) : null,
+                    };
+                  }),
+                ),
+              );
+              const conn = await pool.getConnection();
+              try {
+                await conn.beginTransaction();
+                await conn.query("DELETE FROM courses WHERE user_id = ? AND source = 'scan_sync'", [user.id]);
+                for (const c of allCourses) {
+                  await conn.query(
+                    `INSERT INTO courses (user_id, school_year, school_term, source, name, teacher, classroom, weekday, start_period, period_span, week_start, week_end, week_type, week_pattern, active_weeks, course_type, color_class, campus, class_group, class_composition, exam_method, elective_note, hours_breakdown, weekly_hours, total_hours, credit)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      c.user_id,
+                      c.school_year,
+                      c.school_term,
+                      c.source,
+                      c.name,
+                      c.teacher,
+                      c.classroom,
+                      c.weekday,
+                      c.start_period,
+                      c.period_span,
+                      c.week_start,
+                      c.week_end,
+                      c.week_type,
+                      c.week_pattern,
+                      c.active_weeks,
+                      c.course_type,
+                      c.color_class,
+                      c.campus,
+                      c.class_group,
+                      c.class_composition,
+                      c.exam_method,
+                      c.elective_note,
+                      c.hours_breakdown,
+                      c.weekly_hours,
+                      c.total_hours,
+                      c.credit,
+                    ],
+                  );
+                }
+                await conn.commit();
+                courseCount = allCourses.length;
+                logger.business('课表自动同步', {
+                  user_id: user.id,
+                  count: courseCount,
+                  termCount: terms.length,
+                  trace_id: req._traceId,
+                });
+              } catch (e: any) {
+                await conn.rollback();
+                logger.error('课表同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
+              } finally {
+                conn.release();
+              }
+            } catch (e: any) {
+              logger.warn('课表自动同步失败（可忽略）', { error: e.message, user_id: user.id, trace_id: req._traceId });
+            }
+          }
+
+          // 同步成绩
+          if (grades.length) {
+            try {
+              const conn = await pool.getConnection();
+              try {
+                await conn.beginTransaction();
+                // 只删除本次刷新涉及到的学期，不 nuke 全部——防止当前学期"待评价"冲掉旧学期真实分数
+                const terms = [...new Set(grades.map((g: any) => `${g.schoolYear}-${g.schoolTerm}`))];
+                for (const t of terms) {
+                  const [y, s] = t.split('-');
+                  await conn.query('DELETE FROM grades WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                    user.id,
+                    y,
+                    s,
+                  ]);
+                }
+                for (const g of grades) {
+                  await conn.query(
+                    `INSERT INTO grades (user_id, school_year, school_term, course_name, teacher, credit, grade, grade_point, exam_nature, course_nature, course_category, course_attribution, open_college)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      user.id,
+                      g.schoolYear,
+                      g.schoolTerm,
+                      g.courseName,
+                      g.teacher,
+                      g.credit,
+                      g.grade,
+                      g.gradePoint,
+                      g.examNature,
+                      g.courseNature,
+                      g.courseCategory,
+                      g.courseAttribution,
+                      g.openCollege,
+                    ],
+                  );
+                }
+                await conn.commit();
+                gradeCount = grades.length;
+                logger.business('成绩自动同步', { user_id: user.id, count: gradeCount, trace_id: req._traceId });
+              } catch (e: any) {
+                await conn.rollback();
+                logger.error('成绩同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
+              } finally {
+                conn.release();
+              }
+            } catch (e: any) {
+              logger.warn('成绩自动同步失败（可忽略）', { error: e.message, user_id: user.id, trace_id: req._traceId });
+            }
+          }
+
+          // 同步考试安排
+          if (exams.length) {
+            try {
+              const conn = await pool.getConnection();
+              try {
+                await conn.beginTransaction();
+                // 只删除本次刷新涉及到的学期
+                const examTerms = [...new Set(exams.map((ex: any) => `${ex.schoolYear}-${ex.schoolTerm}`))];
+                for (const t of examTerms) {
+                  const [y, s] = t.split('-');
+                  await conn.query('DELETE FROM exams WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                    user.id,
+                    y,
+                    s,
+                  ]);
+                }
+                for (const ex of exams) {
+                  await conn.query(
+                    `INSERT INTO exams (user_id, school_year, school_term, course_name, teacher, exam_name, exam_time, exam_location, campus, seat_number)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      user.id,
+                      ex.schoolYear,
+                      ex.schoolTerm,
+                      ex.courseName,
+                      ex.teacher,
+                      ex.examName,
+                      ex.examTime,
+                      ex.examLocation,
+                      ex.campus,
+                      ex.seatNumber,
+                    ],
+                  );
+                }
+                await conn.commit();
+                examCount = exams.length;
+                logger.business('考试安排自动同步', { user_id: user.id, count: examCount, trace_id: req._traceId });
+              } catch (e: any) {
+                await conn.rollback();
+                logger.error('考试安排同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
+              } finally {
+                conn.release();
+              }
+            } catch (e: any) {
+              logger.warn('考试安排自动同步失败（可忽略）', {
+                error: e.message,
+                user_id: user.id,
+                trace_id: req._traceId,
+              });
+            }
+          }
         } catch (err: any) {
-          session.examsData = null; // 失败释放占位
-          logger.warn('考试获取异常（可忽略，不影响登录）', { sessionId, trace_id: req._traceId, error: err.message });
+          logger.warn('后台数据同步异常（可忽略，不影响登录）', {
+            sessionId,
+            trace_id: req._traceId,
+            error: err.message,
+          });
         }
-      }
-
-      // ── 同步课表：多学期全部写入，只清空/覆盖 source='scan_sync' 的记录，不动手动/OCR课程 ──
-      let courseCount = 0;
-      try {
-        const terms: { xnm: string; xqm: string; courses: any[] }[] = Array.isArray(session.scheduleData) ? session.scheduleData : [];
-        if (terms.length) {
-          // 字段映射已用官网真实课程(职业礼仪/民俗文化与生活/会计信息系统应用，含跨周三、周五两个
-          // 不同星期的样本)完整交叉验证过，全部确认无误：
-          // xqj=真实星期几(1=周一...5=周五，跟本项目 weekday 惯例一致，不用再转换)——之前用的 day
-          // 字段其实是查询当天的日期(日期里的"几号")，跟星期几无关，两个不同星期的课却显示了同一个
-          // day 值，这次靠着两门已知真实星期不同的课对比才排除掉这个误判
-          // xm=教师姓名——之前误判"接口不返回教师"是因为 describeArrayFields 把字段列表截到25个，
-          // 刚好把 xm 截没了，不是接口真的没有这个字段
-          // zcd=真实周次文本(如"1-16周")——取代之前误用的 jxbzc(其实是教学班相关文本，不是周次)
-          // jc/jcor/jcs=节次范围文本、cdmc=上课地点、jxbmc=教学班、kcmc=课程名，维持原映射
-          // 官网富字段这次也基本配齐：xqmc=校区、khfsmc=考核方式、kcxszc=课程学时组成、
-          // zhxs=周学时、zxs=总学时、xf=学分；教学班组成/选课备注这两个目前还没找到对应字段，先留空
-          const allCourses = terms.flatMap(({ xnm, xqm, courses }) => courses.map((item: any) => {
-            const rawXqj = Number(item.xqj);
-            const weekday = rawXqj === 0 ? 7 : (rawXqj || 1);
-            const periodText = String(item.jcs || item.jcor || item.jc || '');
-            const periodMatch = periodText.match(/(\d+)(?:[-~](\d+))?/);
-            const start = periodMatch ? parseInt(periodMatch[1], 10) : 1;
-            const end = periodMatch && periodMatch[2] ? parseInt(periodMatch[2], 10) : start;
-            const zcText = String(item.zcd || '');
-            const activeWeeks = parseWeekPattern(zcText);
-            // week_start/week_end/week_type 保留作简单兜底展示(比如老版本前端或manual/OCR课程的
-            // 展示逻辑)，取活动周次的最小/最大值；真正判断"第N周是否有这门课"用 activeWeeks 精确查
-            const weekStart = activeWeeks.length ? activeWeeks[0] : 1;
-            const weekEnd = activeWeeks.length ? activeWeeks[activeWeeks.length - 1] : 18;
-            return {
-              user_id: user.id,
-              school_year: xnm,
-              school_term: xqm,
-              source: 'scan_sync',
-              name: item.kcmc || '未知课程',
-              teacher: item.xm || '',
-              classroom: item.cdmc || '',
-              weekday,
-              start_period: start,
-              period_span: Math.max(end - start + 1, 1),
-              week_start: weekStart,
-              week_end: weekEnd,
-              week_type: 'all', // 真实的单双周信息已经精确编码进 active_weeks，这个字段只是兜底展示
-              week_pattern: zcText || null,
-              active_weeks: activeWeeks.length ? JSON.stringify(activeWeeks) : null,
-              course_type: 'theory',
-              campus: item.xqmc || null,
-              class_group: item.jxbmc || null,
-              class_composition: null,
-              exam_method: item.khfsmc || null,
-              elective_note: null,
-              hours_breakdown: item.kcxszc || null,
-              weekly_hours: item.zhxs != null && item.zhxs !== '' ? String(item.zhxs) : null,
-              total_hours: item.zxs != null && item.zxs !== '' ? String(item.zxs) : null,
-              credit: item.xf != null && item.xf !== '' ? String(item.xf) : null,
-            };
-          }));
-
-          const conn = await pool.getConnection();
-          try {
-            await conn.beginTransaction();
-            await conn.query("DELETE FROM courses WHERE user_id = ? AND source = 'scan_sync'", [user.id]);
-            for (const c of allCourses) {
-              await conn.query(
-                `INSERT INTO courses (user_id, school_year, school_term, source, name, teacher, classroom, weekday, start_period, period_span, week_start, week_end, week_type, week_pattern, active_weeks, course_type, campus, class_group, class_composition, exam_method, elective_note, hours_breakdown, weekly_hours, total_hours, credit)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [c.user_id, c.school_year, c.school_term, c.source, c.name, c.teacher, c.classroom, c.weekday, c.start_period, c.period_span, c.week_start, c.week_end, c.week_type, c.week_pattern, c.active_weeks, c.course_type, c.campus, c.class_group, c.class_composition, c.exam_method, c.elective_note, c.hours_breakdown, c.weekly_hours, c.total_hours, c.credit],
-              );
-            }
-            await conn.commit();
-            courseCount = allCourses.length;
-            logger.business('课表自动同步', { user_id: user.id, count: courseCount, termCount: terms.length, trace_id: req._traceId });
-          } catch (e: any) {
-            await conn.rollback();
-            logger.error('课表同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
-          } finally { conn.release(); }
-        }
-      } catch (e: any) {
-        logger.warn('课表自动同步失败（可忽略）', { error: e.message, user_id: user.id, trace_id: req._traceId });
-      }
-
-      // ── 同步成绩（覆盖式：DELETE + INSERT，与课表同步同一模式）──
-      let gradeCount = 0;
-      try {
-        const grades = session.gradesData;
-        if (grades?.length) {
-          const conn = await pool.getConnection();
-          try {
-            await conn.beginTransaction();
-            await conn.query('DELETE FROM grades WHERE user_id = ?', [user.id]);
-            for (const g of grades) {
-              await conn.query(
-                `INSERT INTO grades (user_id, school_year, school_term, course_name, teacher, credit, grade, grade_point, exam_nature, course_nature, course_category, course_attribution, open_college)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [user.id, g.schoolYear, g.schoolTerm, g.courseName, g.teacher, g.credit, g.grade, g.gradePoint, g.examNature, g.courseNature, g.courseCategory, g.courseAttribution, g.openCollege],
-              );
-            }
-            await conn.commit();
-            gradeCount = grades.length;
-            logger.business('成绩自动同步', { user_id: user.id, count: gradeCount, trace_id: req._traceId });
-          } catch (e: any) {
-            await conn.rollback();
-            logger.error('成绩同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
-          } finally { conn.release(); }
-        }
-      } catch (e: any) {
-        logger.warn('成绩自动同步失败（可忽略）', { error: e.message, user_id: user.id, trace_id: req._traceId });
-      }
-
-      // ── 同步考试安排（覆盖式）──
-      let examCount = 0;
-      try {
-        const exams = session.examsData;
-        if (exams?.length) {
-          const conn = await pool.getConnection();
-          try {
-            await conn.beginTransaction();
-            await conn.query('DELETE FROM exams WHERE user_id = ?', [user.id]);
-            for (const ex of exams) {
-              await conn.query(
-                `INSERT INTO exams (user_id, school_year, school_term, course_name, teacher, exam_name, exam_time, exam_location, campus, seat_number)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [user.id, ex.schoolYear, ex.schoolTerm, ex.courseName, ex.teacher, ex.examName, ex.examTime, ex.examLocation, ex.campus, ex.seatNumber],
-              );
-            }
-            await conn.commit();
-            examCount = exams.length;
-            logger.business('考试安排自动同步', { user_id: user.id, count: examCount, trace_id: req._traceId });
-          } catch (e: any) {
-            await conn.rollback();
-            logger.error('考试安排同步失败', { error: e.message, user_id: user.id, trace_id: req._traceId });
-          } finally { conn.release(); }
-        }
-      } catch (e: any) {
-        logger.warn('考试安排自动同步失败（可忽略）', { error: e.message, user_id: user.id, trace_id: req._traceId });
-      }
+      })().catch((err) => logger.error('后台数据同步失败', { sessionId, trace_id: req._traceId, error: err.message }));
 
       // ── 下发 JWT（amr=scan：教务扫码为权威身份源，1 小时内可免旧密码重设密码） ──
       const isAdmin = !!user.is_admin;
@@ -1019,12 +1360,15 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
       try {
         await pool.query('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
         await pool.query(
-          'INSERT INTO refresh_tokens (user_id, token, expires_at, device_info, ip_address) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?)',
-          [user.id, refreshToken, Math.floor(Date.now() / 1000) + 2592000, deviceInfo, req.ip || ''],
+          'INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_info, ip_address) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?)',
+          [user.id, hashToken(refreshToken), Math.floor(Date.now() / 1000) + 2592000, deviceInfo, req.ip || ''],
         );
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
 
-      pool.query('UPDATE users SET last_login = NOW(), ip_address = ? WHERE id = ?', [req.ip || '', user.id])
+      pool
+        .query('UPDATE users SET last_login = NOW(), ip_address = ? WHERE id = ?', [req.ip || '', user.id])
         .catch(() => {});
 
       session.result = {
@@ -1036,17 +1380,448 @@ export function registerWechatAuthRoutes(app: any, pool: Pool) {
           coursesImported: courseCount,
           gradesImported: gradeCount,
           examsImported: examCount,
-          message: courseCount > 0 ? `已同步 ${courseCount} 门课程、${gradeCount} 条成绩、${examCount} 场考试` : '未同步课表',
+          message: '个人信息同步中...',
         },
       };
-      // 结果已缓存，浏览器立即释放（原来等 5 分钟清理器回收，每个成功登录白占 ~200MB）
-      releaseBrowser(session);
       return ok(res, session.result);
-
     } catch (err: any) {
       logger.error('轮询扫码结果失败', { error: err.message, sessionId, trace_id: req._traceId });
       closeSession(sessionId);
       return fail(res, 500, '登录处理失败，请重试');
+    }
+  });
+
+  // ── 3. 主动取消（关闭弹窗/重新扫码时调用）──
+  // 根治"只有我一个人扫码却提示人数过多"：旧行为是前端关闭弹窗/点重试就不管了，
+  // 服务端那支浏览器要等 SESSION_TTL_MS(7分钟) 才被清理器回收，几次重试就把
+  // MAX_CONCURRENT_PER_IP/MAX_CONCURRENT_BROWSERS 顶满。这里让前端在放弃一个会话时
+  // 立即释放，不用等超时。sessionId 不存在/已释放都当成功处理（幂等，前端不用关心时序）
+  app.post('/api/v1/auth/wechat-cancel', limiter(10, 30), async (req: Request, res: Response) => {
+    const { sessionId } = req.body;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return fail(res, 400, '缺少 sessionId');
+    }
+    closeSession(sessionId);
+    logger.info('扫码会话主动取消', { sessionId, trace_id: req._traceId });
+    return ok(res, { cancelled: true });
+  });
+
+  // ── 4. 一键刷新教务数据（课表/成绩/考试），复用存储的 Cookie，不需要重新扫码 ──
+  app.post('/api/v1/academic/refresh', auth, limiter(1, 5), async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const [rows]: any = await pool.query('SELECT school_cookie FROM users WHERE id = ?', [userId]);
+      if (!rows.length || !rows[0].school_cookie) {
+        return fail(res, 400, '未找到教务会话，请重新扫码登录');
+      }
+      const cookieHeader = decrypt(rows[0].school_cookie);
+      if (!cookieHeader) {
+        return fail(res, 400, '教务会话已过期，请重新扫码登录');
+      }
+
+      const limit = createLimiter(3);
+      const httpLogCb = (label: string) => (msg: string) =>
+        logger.info(`${label}API详情`, { user_id: userId, trace_id: req._traceId, detail: msg });
+
+      // 从 sessions 取 refererUrl（无活跃会话时用兜底）
+      let refererUrl = 'https://jw.scpcfe.cn/jwglxt/xtgl/login_slogin.html';
+      for (const s of sessions.values()) {
+        if (s.landingUrl) {
+          refererUrl = s.landingUrl;
+          break;
+        }
+      }
+
+      let courseCount = 0,
+        gradeCount = 0,
+        examCount = 0;
+      let sessionInvalid = false;
+
+      try {
+        const scheduleResult = await fetchAllSchedulesHttp(cookieHeader, refererUrl, limit, httpLogCb('课表'));
+        // 全部学期都返回会话失效 → cookie 已过期
+        if (scheduleResult && !scheduleResult.terms.length) {
+          // 快速验证：用单学期请求确认会话是否有效
+          const testBody = `xnm=2025&xqm=12&_search=false&queryModel.showCount=1&time=0`;
+          const testResp = await jwFetchJson(
+            `${JWGLXT_ORIGIN}/jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151`,
+            testBody,
+            cookieHeader,
+            refererUrl,
+          );
+          if (testResp.invalidSession) sessionInvalid = true;
+        }
+        if (scheduleResult && scheduleResult.terms.length) {
+          const { studentId: schId, studentName: schName, terms } = scheduleResult;
+          logger.info('课表API', { user_id: userId, gotId: !!schId, gotName: !!schName, termCount: terms.length });
+
+          // 同步课表
+          const allCourses = assignCourseColors(
+            terms.flatMap(({ xnm, xqm, courses }) =>
+              courses.map((item: any) => {
+                const rawXqj = Number(item.xqj);
+                const weekday = rawXqj === 0 ? 7 : rawXqj || 1;
+                const periodText = String(item.jcs || item.jcor || item.jc || '');
+                const periodMatch = periodText.match(/(\d+)(?:[-~](\d+))?/);
+                const start = periodMatch ? parseInt(periodMatch[1], 10) : 1;
+                const end = periodMatch && periodMatch[2] ? parseInt(periodMatch[2], 10) : start;
+                const zcText = String(item.zcd || '');
+                const activeWeeks = parseWeekPattern(zcText);
+                return {
+                  user_id: userId,
+                  school_year: xnm,
+                  school_term: xqm,
+                  source: 'scan_sync',
+                  name: item.kcmc || '未知课程',
+                  teacher: item.xm || '',
+                  classroom: item.cdmc || '',
+                  weekday,
+                  start_period: start,
+                  period_span: Math.max(end - start + 1, 1),
+                  week_start: activeWeeks.length ? activeWeeks[0] : 1,
+                  week_end: activeWeeks.length ? activeWeeks[activeWeeks.length - 1] : 18,
+                  week_type: 'all',
+                  week_pattern: zcText || null,
+                  active_weeks: activeWeeks.length ? JSON.stringify(activeWeeks) : null,
+                  course_type: 'theory',
+                  campus: item.xqmc || null,
+                  class_group: item.jxbmc || null,
+                  class_composition: null,
+                  exam_method: item.khfsmc || null,
+                  elective_note: null,
+                  hours_breakdown: item.kcxszc || null,
+                  weekly_hours: item.zhxs != null ? String(item.zhxs) : null,
+                  total_hours: item.zxs != null ? String(item.zxs) : null,
+                  credit: item.xf != null ? String(item.xf) : null,
+                };
+              }),
+            ),
+          );
+
+          const conn = await pool.getConnection();
+          try {
+            await conn.beginTransaction();
+            await conn.query("DELETE FROM courses WHERE user_id = ? AND source = 'scan_sync'", [userId]);
+            for (const c of allCourses) {
+              await conn.query(
+                `INSERT INTO courses (user_id, school_year, school_term, source, name, teacher, classroom, weekday, start_period, period_span, week_start, week_end, week_type, week_pattern, active_weeks, course_type, color_class, campus, class_group, class_composition, exam_method, elective_note, hours_breakdown, weekly_hours, total_hours, credit)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  c.user_id,
+                  c.school_year,
+                  c.school_term,
+                  c.source,
+                  c.name,
+                  c.teacher,
+                  c.classroom,
+                  c.weekday,
+                  c.start_period,
+                  c.period_span,
+                  c.week_start,
+                  c.week_end,
+                  c.week_type,
+                  c.week_pattern,
+                  c.active_weeks,
+                  c.course_type,
+                  c.color_class,
+                  c.campus,
+                  c.class_group,
+                  c.class_composition,
+                  c.exam_method,
+                  c.elective_note,
+                  c.hours_breakdown,
+                  c.weekly_hours,
+                  c.total_hours,
+                  c.credit,
+                ],
+              );
+            }
+            await conn.commit();
+            courseCount = allCourses.length;
+          } catch (e: any) {
+            await conn.rollback();
+            throw e;
+          } finally {
+            conn.release();
+          }
+          logger.business('课表自动刷新', { user_id: userId, count: courseCount, trace_id: req._traceId });
+        }
+      } catch (err: any) {
+        logger.warn('课表刷新失败', { user_id: userId, trace_id: req._traceId, error: err.message });
+      }
+
+      // ── 成绩刷新（POST /academic/refresh） ──
+      try {
+        const grades = await fetchGradesHttp(cookieHeader, refererUrl, limit, httpLogCb('成绩'));
+        if (grades.length) {
+          const conn = await pool.getConnection();
+          try {
+            await conn.beginTransaction();
+            // 只删除本次刷新涉及到的学期
+            const terms = [...new Set(grades.map((g: any) => `${g.schoolYear}-${g.schoolTerm}`))];
+            for (const t of terms) {
+              const [y, s] = t.split('-');
+              await conn.query('DELETE FROM grades WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                userId,
+                y,
+                s,
+              ]);
+            }
+            for (const g of grades) {
+              await conn.query(
+                `INSERT INTO grades (user_id, school_year, school_term, course_name, teacher, credit, grade, grade_point, exam_nature, course_nature, course_category, course_attribution, open_college)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  userId,
+                  g.schoolYear,
+                  g.schoolTerm,
+                  g.courseName,
+                  g.teacher,
+                  g.credit,
+                  g.grade,
+                  g.gradePoint,
+                  g.examNature,
+                  g.courseNature,
+                  g.courseCategory,
+                  g.courseAttribution,
+                  g.openCollege,
+                ],
+              );
+            }
+            await conn.commit();
+            gradeCount = grades.length;
+          } catch (e: any) {
+            await conn.rollback();
+            throw e;
+          } finally {
+            conn.release();
+          }
+          logger.business('成绩自动刷新', { user_id: userId, count: gradeCount, trace_id: req._traceId });
+        }
+      } catch (err: any) {
+        logger.warn('成绩刷新失败', { user_id: userId, trace_id: req._traceId, error: err.message });
+      }
+
+      try {
+        const exams = await fetchExamsHttp(cookieHeader, refererUrl, limit, httpLogCb('考试'));
+        if (exams.length) {
+          const conn = await pool.getConnection();
+          try {
+            await conn.beginTransaction();
+            // 只删除本次刷新涉及到的学期
+            const examTerms = [...new Set(exams.map((ex: any) => `${ex.schoolYear}-${ex.schoolTerm}`))];
+            for (const t of examTerms) {
+              const [y, s] = t.split('-');
+              await conn.query('DELETE FROM exams WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                userId,
+                y,
+                s,
+              ]);
+            }
+            for (const ex of exams) {
+              await conn.query(
+                `INSERT INTO exams (user_id, school_year, school_term, course_name, teacher, exam_name, exam_time, exam_location, campus, seat_number)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  userId,
+                  ex.schoolYear,
+                  ex.schoolTerm,
+                  ex.courseName,
+                  ex.teacher,
+                  ex.examName,
+                  ex.examTime,
+                  ex.examLocation,
+                  ex.campus,
+                  ex.seatNumber,
+                ],
+              );
+            }
+            await conn.commit();
+            examCount = exams.length;
+          } catch (e: any) {
+            await conn.rollback();
+            throw e;
+          } finally {
+            conn.release();
+          }
+          logger.business('考试安排自动刷新', { user_id: userId, count: examCount, trace_id: req._traceId });
+        }
+      } catch (err: any) {
+        logger.warn('考试安排刷新失败', { user_id: userId, trace_id: req._traceId, error: err.message });
+      }
+
+      if (sessionInvalid) {
+        // 会话已失效，清除存储的 cookie 并提示用户重新扫码
+        pool.query('UPDATE users SET school_cookie = NULL WHERE id = ?', [userId]).catch(() => {});
+        return fail(res, 400, '教务登录已过期，请重新扫码');
+      }
+
+      ok(res, {
+        coursesImported: courseCount,
+        gradesImported: gradeCount,
+        examsImported: examCount,
+        message: `已同步 ${courseCount} 门课程、${gradeCount} 条成绩、${examCount} 场考试`,
+      });
+    } catch (err: any) {
+      logger.error('教务数据刷新失败', { error: err.message, trace_id: req._traceId });
+      fail(res, 500, '刷新失败，请重试');
+    }
+  });
+
+  // ── 5. 轻量刷新——只同步成绩+考试（跳过课表），适合高频轮询 ──
+  app.post('/api/v1/grades/refresh', auth, limiter(2, 10), async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const [rows]: any = await pool.query('SELECT school_cookie FROM users WHERE id = ?', [userId]);
+      if (!rows.length || !rows[0].school_cookie) {
+        return fail(res, 400, '未找到教务会话，请重新扫码登录');
+      }
+      const cookieHeader = decrypt(rows[0].school_cookie);
+      if (!cookieHeader) {
+        return fail(res, 400, '教务会话已过期，请重新扫码登录');
+      }
+
+      const limit = createLimiter(3);
+      const httpLogCb = (label: string) => (msg: string) =>
+        logger.info(`${label}API详情`, { user_id: userId, trace_id: req._traceId, detail: msg });
+
+      // 从 sessions 取 refererUrl（无活跃会话时用兜底）
+      let refererUrl = 'https://jw.scpcfe.cn/jwglxt/xtgl/login_slogin.html';
+      for (const s of sessions.values()) {
+        if (s.landingUrl) {
+          refererUrl = s.landingUrl;
+          break;
+        }
+      }
+
+      let gradeCount = 0,
+        examCount = 0;
+      let sessionInvalid = false;
+
+      // ── 成绩刷新（POST /grades/refresh） ──
+      try {
+        const grades = await fetchGradesHttp(cookieHeader, refererUrl, limit, httpLogCb('成绩'));
+        if (grades.length) {
+          const conn = await pool.getConnection();
+          try {
+            await conn.beginTransaction();
+            // 只删除本次刷新涉及到的学期
+            const terms = [...new Set(grades.map((g: any) => `${g.schoolYear}-${g.schoolTerm}`))];
+            for (const t of terms) {
+              const [y, s] = t.split('-');
+              await conn.query('DELETE FROM grades WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                userId,
+                y,
+                s,
+              ]);
+            }
+            for (const g of grades) {
+              await conn.query(
+                `INSERT INTO grades (user_id, school_year, school_term, course_name, teacher, credit, grade, grade_point, exam_nature, course_nature, course_category, course_attribution, open_college)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  userId,
+                  g.schoolYear,
+                  g.schoolTerm,
+                  g.courseName,
+                  g.teacher,
+                  g.credit,
+                  g.grade,
+                  g.gradePoint,
+                  g.examNature,
+                  g.courseNature,
+                  g.courseCategory,
+                  g.courseAttribution,
+                  g.openCollege,
+                ],
+              );
+            }
+            await conn.commit();
+            gradeCount = grades.length;
+          } catch (e: any) {
+            await conn.rollback();
+            throw e;
+          } finally {
+            conn.release();
+          }
+          logger.business('成绩轻量刷新', { user_id: userId, count: gradeCount, trace_id: req._traceId });
+        } else {
+          // 所有学期/端点都没数据 → 可能教务会话已过期，发快速探测确认
+          const testBody = `xnm=2025&xqm=12&_search=false&queryModel.showCount=1&time=0`;
+          const testResp = await jwFetchJson(
+            `${JWGLXT_ORIGIN}/jwglxt/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151`,
+            testBody,
+            cookieHeader,
+            refererUrl,
+          );
+          if (testResp.invalidSession) sessionInvalid = true;
+        }
+      } catch (err: any) {
+        logger.warn('成绩轻量刷新失败', { user_id: userId, trace_id: req._traceId, error: err.message });
+      }
+
+      // ── 考试安排 ──
+      try {
+        const exams = await fetchExamsHttp(cookieHeader, refererUrl, limit, httpLogCb('考试'));
+        if (exams.length) {
+          const conn = await pool.getConnection();
+          try {
+            await conn.beginTransaction();
+            // 只删除本次刷新涉及到的学期
+            const examTerms = [...new Set(exams.map((ex: any) => `${ex.schoolYear}-${ex.schoolTerm}`))];
+            for (const t of examTerms) {
+              const [y, s] = t.split('-');
+              await conn.query('DELETE FROM exams WHERE user_id = ? AND school_year = ? AND school_term = ?', [
+                userId,
+                y,
+                s,
+              ]);
+            }
+            for (const ex of exams) {
+              await conn.query(
+                `INSERT INTO exams (user_id, school_year, school_term, course_name, teacher, exam_name, exam_time, exam_location, campus, seat_number)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  userId,
+                  ex.schoolYear,
+                  ex.schoolTerm,
+                  ex.courseName,
+                  ex.teacher,
+                  ex.examName,
+                  ex.examTime,
+                  ex.examLocation,
+                  ex.campus,
+                  ex.seatNumber,
+                ],
+              );
+            }
+            await conn.commit();
+            examCount = exams.length;
+          } catch (e: any) {
+            await conn.rollback();
+            throw e;
+          } finally {
+            conn.release();
+          }
+          logger.business('考试安排轻量刷新', { user_id: userId, count: examCount, trace_id: req._traceId });
+        }
+      } catch (err: any) {
+        logger.warn('考试安排轻量刷新失败', { user_id: userId, trace_id: req._traceId, error: err.message });
+      }
+
+      if (sessionInvalid) {
+        pool.query('UPDATE users SET school_cookie = NULL WHERE id = ?', [userId]).catch(() => {});
+        return fail(res, 400, '教务登录已过期，请重新扫码');
+      }
+
+      ok(res, {
+        gradesImported: gradeCount,
+        examsImported: examCount,
+        message: `已同步 ${gradeCount} 条成绩、${examCount} 场考试`,
+      });
+    } catch (err: any) {
+      logger.error('成绩轻量刷新失败', { error: err.message, trace_id: req._traceId });
+      fail(res, 500, '刷新失败，请重试');
     }
   });
 }

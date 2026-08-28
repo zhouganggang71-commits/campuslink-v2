@@ -1,7 +1,7 @@
 /**
  * 数据加密工具测试
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // 需要环境变量，设一个测试用值
 process.env.ENCRYPTION_KEY = 'test-encryption-key-32chars!!';

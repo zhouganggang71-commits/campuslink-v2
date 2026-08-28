@@ -1,10 +1,11 @@
-import { useState, lazy, Suspense, useRef, useCallback } from 'react';
+import { useState, lazy, Suspense, useRef, useCallback, useEffect } from 'react';
 import { Listing } from '../../types';
 import Icon from '../ui/Icon';
+import ReportModal from '../modal/ReportModal';
+import { transactionsApi } from '../../api';
+import { request } from '../../api/client';
 
 const RegisterPanel = lazy(() => import('./RegisterPanel'));
-
-const REPORT_REASONS = ['虚假信息', '诈骗钓鱼', '色情低俗', '违禁品', '人身攻击', '其他违规'];
 
 interface ListingDetailProps {
   listing: Listing;
@@ -13,7 +14,6 @@ interface ListingDetailProps {
   savedListingIds: string[];
   toggleSaveListing: (id: string) => void;
   onCopyContact: (contactInfo: string) => void;
-  onReport: (id: string, reason: string) => void;
   postTypeLabel: (pt: string) => string;
   currentUserName: string;
   onDelete: (id: string) => void;
@@ -21,6 +21,8 @@ interface ListingDetailProps {
   isGuest?: boolean;
   onStartChat?: (userId: number) => void;
   onViewProfile?: (userId: number, placeholder: any) => void;
+  /** 发起面交交易（R12 Phase 2）：返回是否成功 */
+  onStartTransaction?: (postId: number) => Promise<boolean>;
 }
 
 export default function ListingDetail({
@@ -30,19 +32,77 @@ export default function ListingDetail({
   savedListingIds,
   toggleSaveListing,
   onCopyContact,
-  onReport,
   postTypeLabel,
   currentUserName,
   onDelete,
   currentProfile,
   isGuest,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onStartChat,
   onViewProfile,
+  onStartTransaction,
 }: ListingDetailProps) {
   const isSaved = savedListingIds.includes(listing.id);
   const isReal = /^\d+$/.test(listing.id); // 真实帖子 ID 为纯数字，mock 数据 ID 如 headphones-1 非数字
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [txBusy, setTxBusy] = useState(false);
+  const [sellerRep, setSellerRep] = useState<{ score: number; count: number } | null>(null);
+  const [txStatus, setTxStatus] = useState<{ active: boolean; status?: string; myRole?: string } | null>(null);
   const isOwn = listing.publisherName === currentUserName;
+
+  // 帖子交易状态（登录且真实帖子时查询，显示"交易中"）
+  useEffect(() => {
+    if (!isReal || isGuest) return;
+    let cancelled = false;
+    request('GET', `/api/v1/transactions/post/${listing.id}`)
+      .then((r: any) => {
+        if (!cancelled && r.code === 0) setTxStatus(r.data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isReal, isGuest, listing.id]);
+
+  // 卖家信誉（公开接口，仅真实用户且有 publisherId 时拉取）
+  useEffect(() => {
+    if (!isReal || !listing.publisherId || listing.publisherId <= 0) return;
+    let cancelled = false;
+    transactionsApi
+      .reputation(listing.publisherId)
+      .then((r) => {
+        if (!cancelled && r.code === 0 && r.data && r.data.reviewCount > 0) {
+          setSellerRep({ score: r.data.reputationScore, count: r.data.reviewCount });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isReal, listing.publisherId]);
+
+  const handleStartTx = () => {
+    if (!listing.publisherId || txBusy || !onStartTransaction) return;
+    setTxBusy(true);
+    onStartTransaction(Number(listing.id))
+      .then((ok) => {
+        if (ok) setTxBusy(true);
+      })
+      .finally(() => setTxBusy(false));
+  };
+
+  // 帖子处于面交交易中（含进行中/已完成，非 cancelled）
+  const txInProgress = txStatus?.active === true;
+
+  // 是否展示面交购买按钮：真实帖子 + 非本人 + sell 类型
+  const canFaceTrade =
+    isReal &&
+    !isOwn &&
+    !isGuest &&
+    !txInProgress &&
+    listing.postType === 'sell' &&
+    listing.status === 'active' &&
+    !!onStartTransaction;
 
   // ── 手势滑动 ──
   const touchStartX = useRef(0);
@@ -55,11 +115,14 @@ export default function ListingDetail({
     setSwipeDelta(0);
   }, []);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!swiping) return;
-    const dx = e.touches[0].clientX - touchStartX.current;
-    setSwipeDelta(dx);
-  }, [swiping]);
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!swiping) return;
+      const dx = e.touches[0].clientX - touchStartX.current;
+      setSwipeDelta(dx);
+    },
+    [swiping],
+  );
 
   const handleTouchEnd = useCallback(() => {
     setSwiping(false);
@@ -77,21 +140,21 @@ export default function ListingDetail({
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
       {listing.imageUrls.length > 0 && (
-      <section
-        className="relative w-full aspect-square bg-gray-100 overflow-hidden"
-        onTouchStart={listing.imageUrls.length > 1 ? handleTouchStart : undefined}
-        onTouchMove={listing.imageUrls.length > 1 ? handleTouchMove : undefined}
-        onTouchEnd={listing.imageUrls.length > 1 ? handleTouchEnd : undefined}
-      >
-        <div
-          className="w-full h-full flex transition-transform duration-300"
-          style={{
-            transform: swiping
-              ? `translateX(calc(-${carouselIndex * 100}% + ${swipeDelta}px))`
-              : `translateX(-${carouselIndex * 100}%)`,
-          }}
+        <section
+          className="relative w-full aspect-square bg-gray-100 overflow-hidden"
+          onTouchStart={listing.imageUrls.length > 1 ? handleTouchStart : undefined}
+          onTouchMove={listing.imageUrls.length > 1 ? handleTouchMove : undefined}
+          onTouchEnd={listing.imageUrls.length > 1 ? handleTouchEnd : undefined}
         >
-          {listing.imageUrls.map((url, i) => (
+          <div
+            className="w-full h-full flex transition-transform duration-300"
+            style={{
+              transform: swiping
+                ? `translateX(calc(-${carouselIndex * 100}% + ${swipeDelta}px))`
+                : `translateX(-${carouselIndex * 100}%)`,
+            }}
+          >
+            {listing.imageUrls.map((url, i) => (
               <img
                 key={i}
                 src={url}
@@ -100,35 +163,35 @@ export default function ListingDetail({
                 referrerPolicy="no-referrer"
               />
             ))}
-        </div>
-        {listing.imageUrls.length > 1 && (
-          <>
-            <button
-              onClick={() => setCarouselIndex(carouselIndex > 0 ? carouselIndex - 1 : listing.imageUrls.length - 1)}
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/30 backdrop-blur text-white flex items-center justify-center hover:bg-black/50 transition-colors"
-            >
-              <Icon name="chevron_left" className="text-sm" />
-            </button>
-            <button
-              onClick={() => setCarouselIndex(carouselIndex < listing.imageUrls.length - 1 ? carouselIndex + 1 : 0)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/30 backdrop-blur text-white flex items-center justify-center hover:bg-black/50 transition-colors"
-            >
-              <Icon name="chevron_right" className="text-sm" />
-            </button>
-          </>
-        )}
-        {listing.imageUrls.length > 1 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-            {listing.imageUrls.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => setCarouselIndex(idx)}
-                className={`w-2.5 h-2.5 rounded-full transition-all cursor-pointer ${carouselIndex === idx ? 'bg-white scale-110' : 'bg-white/50'}`}
-              />
-            ))}
           </div>
-        )}
-      </section>
+          {listing.imageUrls.length > 1 && (
+            <>
+              <button
+                onClick={() => setCarouselIndex(carouselIndex > 0 ? carouselIndex - 1 : listing.imageUrls.length - 1)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/30 backdrop-blur text-white flex items-center justify-center hover:bg-black/50 transition-colors"
+              >
+                <Icon name="chevron_left" className="text-sm" />
+              </button>
+              <button
+                onClick={() => setCarouselIndex(carouselIndex < listing.imageUrls.length - 1 ? carouselIndex + 1 : 0)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/30 backdrop-blur text-white flex items-center justify-center hover:bg-black/50 transition-colors"
+              >
+                <Icon name="chevron_right" className="text-sm" />
+              </button>
+            </>
+          )}
+          {listing.imageUrls.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+              {listing.imageUrls.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCarouselIndex(idx)}
+                  className={`w-2.5 h-2.5 rounded-full transition-all cursor-pointer ${carouselIndex === idx ? 'bg-white scale-110' : 'bg-white/50'}`}
+                />
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
       <section className="p-4 bg-white border-b border-gray-100">
@@ -145,6 +208,12 @@ export default function ListingDetail({
           {listing.status === 'sold' && (
             <span className="bg-gray-400 text-white text-xs font-semibold px-2 py-0.5 rounded-full">已售</span>
           )}
+          {txInProgress && !isOwn && (
+            <span className="bg-course-orange/10 text-course-orange text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+              <Icon name="handshake" className="text-[10px]" />
+              交易中
+            </span>
+          )}
           {listing.status === 'closed' && (
             <span className="bg-gray-400 text-white text-xs font-semibold px-2 py-0.5 rounded-full">已关闭</span>
           )}
@@ -160,37 +229,26 @@ export default function ListingDetail({
           )}
           {!isOwn && listing.status === 'active' && !isGuest && (
             <button
-              onClick={() => setIsReportOpen(!isReportOpen)}
-              className="ml-auto text-[10px] text-gray-400 hover:text-course-red flex items-center gap-1 cursor-pointer"
+              onClick={() => setIsReportOpen(true)}
+              className="ml-auto text-[10px] font-semibold text-course-red bg-course-red/5 hover:bg-course-red/10 flex items-center gap-1 px-2 py-1 rounded-full cursor-pointer transition-colors"
             >
-              <Icon name="campaign" className="text-xs" />
+              <Icon name="flag" className="text-xs" />
               举报
             </button>
           )}
         </div>
-        {isReportOpen && !isOwn && (
-          <div className="bg-red-50 border border-red-100 rounded-xl p-3 mb-3 animate-fade-in">
-            <p className="text-xs font-bold text-gray-700 mb-2">请选择举报原因</p>
-            <div className="flex flex-wrap gap-1.5">
-              {REPORT_REASONS.map((reason) => (
-                <button
-                  key={reason}
-                  onClick={() => {
-                    onReport(listing.id, reason);
-                    setIsReportOpen(false);
-                  }}
-                  className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-white border border-red-200 text-red-600 hover:bg-red-100 cursor-pointer"
-                >
-                  {reason}
-                </button>
-              ))}
-            </div>
-          </div>
+        {isReal && (
+          <ReportModal
+            isOpen={isReportOpen}
+            onClose={() => setIsReportOpen(false)}
+            targetType="post"
+            targetId={parseInt(listing.id, 10)}
+          />
         )}
         <h1 className="font-headline text-lg font-bold text-on-surface tracking-tight leading-snug mb-3">
           {listing.title}
         </h1>
-        {listing.postType === 'sell' && listing.price !== undefined && (
+        {listing.postType === 'sell' && listing.price != null && listing.price > 0 && (
           <div className="flex items-baseline gap-3 mb-4">
             <span className="font-headline text-2xl font-bold text-course-red">¥ {listing.price}</span>
             {listing.originalPrice && (
@@ -210,17 +268,24 @@ export default function ListingDetail({
       <section className="p-4 bg-white flex flex-col gap-4">
         <div
           className="flex items-center justify-between"
-          onClick={listing.publisherId > 0 ? () => onViewProfile?.(listing.publisherId, {
-            name: listing.publisherName,
-            avatar: listing.publisherAvatar,
-            isVerified: listing.isVerifiedStudent,
-            department: listing.department,
-            orgLevel: listing.publisherOrgLevel,
-            orgName: listing.orgName,
-            position: listing.publisherPosition,
-          }) : undefined}
+          onClick={
+            listing.publisherId > 0
+              ? () =>
+                  onViewProfile?.(listing.publisherId, {
+                    name: listing.publisherName,
+                    avatar: listing.publisherAvatar,
+                    isVerified: listing.isVerifiedStudent,
+                    department: listing.department,
+                    orgLevel: listing.publisherOrgLevel,
+                    orgName: listing.orgName,
+                    position: listing.publisherPosition,
+                  })
+              : undefined
+          }
         >
-          <div className={`flex items-center gap-3 flex-1 min-w-0 touch-manipulation select-none ${listing.publisherId > 0 ? 'cursor-pointer' : ''}`}>
+          <div
+            className={`flex items-center gap-3 flex-1 min-w-0 touch-manipulation select-none ${listing.publisherId > 0 ? 'cursor-pointer' : ''}`}
+          >
             <img
               src={listing.publisherAvatar}
               alt={listing.publisherName}
@@ -237,6 +302,12 @@ export default function ListingDetail({
                   <span className="bg-course-green text-white text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5 shrink-0">
                     <Icon name="verified" className="text-[10px]" />
                     已认证
+                  </span>
+                )}
+                {sellerRep && (
+                  <span className="bg-course-gold/10 text-course-gold text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5 shrink-0">
+                    <Icon name="favorite" className="text-[10px]" />
+                    {sellerRep.score.toFixed(1)} · {sellerRep.count}人评价
                   </span>
                 )}
               </div>
@@ -307,6 +378,26 @@ export default function ListingDetail({
             <Icon name="delete" className="text-lg" />
             删除
           </button>
+        ) : canFaceTrade ? (
+          <div className="flex-1 flex gap-2">
+            <button
+              onClick={handleStartTx}
+              disabled={txBusy}
+              className="flex-1 bg-primary text-white font-headline text-sm py-2.5 rounded-lg active:scale-95 transition-all flex items-center justify-center gap-2 font-semibold cursor-pointer shadow-lg disabled:opacity-60"
+            >
+              <Icon name="handshake" className="text-lg" />
+              {txBusy ? '发起中…' : '面交购买'}
+            </button>
+            {listing.contactInfo && (
+              <button
+                onClick={() => onCopyContact(listing.contactInfo!)}
+                className="bg-on-surface/5 text-on-surface text-sm py-2.5 px-4 rounded-lg active:scale-95 transition-all flex items-center justify-center gap-1.5 font-semibold cursor-pointer"
+              >
+                <Icon name="content_copy" className="text-base" />
+                复制
+              </button>
+            )}
+          </div>
         ) : listing.contactInfo ? (
           <button
             onClick={() => onCopyContact(listing.contactInfo!)}

@@ -5,23 +5,17 @@
 export const apiSpec = {
   openapi: '3.1.0',
   info: {
-    title: 'CampusLink API — 四川财经职业学院校园信息平台',
+    title: '川财CampusLink API — 四川财经职业学院校园信息平台',
     version: '2.0.0',
     description: '课表查看、二手交易、活动报名、失物招领等校园生活 API',
   },
-  servers: [
-    { url: '/api/v1', description: '当前服务' },
-  ],
+  servers: [{ url: '/api/v1', description: '当前服务' }],
   paths: {
     '/auth/dev-login': {
       post: {
         tags: ['认证'],
-        summary: '登录/注册',
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/LoginInput' } } },
-        },
-        responses: { '200': { description: '登录成功，返回 JWT' } },
+        summary: '已停用（2026-08-28 起仅支持企业微信扫码登录）',
+        responses: { '404': { description: '账号密码登录已停用，请使用企业微信扫码登录' } },
       },
     },
     '/auth/refresh': {
@@ -45,7 +39,25 @@ export const apiSpec = {
         responses: {
           '200': {
             description: '帖子列表',
-            content: { 'application/json': { schema: { type: 'object', properties: { code: { type: 'integer' }, data: { type: 'object', properties: { list: { type: 'array' }, total: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' } } } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    code: { type: 'integer' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        list: { type: 'array' },
+                        total: { type: 'integer' },
+                        page: { type: 'integer' },
+                        limit: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

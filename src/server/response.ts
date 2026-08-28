@@ -3,7 +3,7 @@
  */
 import type { Response } from 'express';
 import { ZodSchema } from 'zod';
-import { ErrorCode, ErrorCodeType } from './errors';
+import { ErrorCode } from './errors';
 
 function trace(req: any): string {
   return req._traceId || '-';

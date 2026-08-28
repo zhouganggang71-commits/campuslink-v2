@@ -127,7 +127,15 @@ export const logger = {
       // 响应头注入 trace ID
       res.setHeader('x-trace-id', traceId);
 
-      const bodyLog = req.method !== 'GET' ? JSON.stringify(req.body || {}).slice(0, 200) : undefined;
+      // body 脱敏：password、token、cookie 等敏感字段不进日志（2026-08-28 曾泄露明文密码）。
+      const SENSITIVE_KEYS = ['password', 'token', 'refresh_token', 'school_cookie', 'cookie'];
+      const safeBody: Record<string, any> = {};
+      if (req.method !== 'GET' && req.body && typeof req.body === 'object') {
+        for (const [k, v] of Object.entries(req.body as Record<string, any>)) {
+          safeBody[k] = SENSITIVE_KEYS.some((s) => k.toLowerCase().includes(s)) ? '[redacted]' : v;
+        }
+      }
+      const bodyLog = req.method !== 'GET' ? JSON.stringify(safeBody).slice(0, 200) : undefined;
 
       res.on('finish', () => {
         const duration = Date.now() - start;

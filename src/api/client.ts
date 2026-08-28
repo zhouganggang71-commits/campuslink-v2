@@ -7,13 +7,25 @@ const REQUEST_TIMEOUT = 15_000;
 const MAX_RETRIES_GET = 1;
 
 function safeGet(store: Storage | null, key: string): string | null {
-  try { return store?.getItem(key) ?? null; } catch { return null; }
+  try {
+    return store?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
 }
 function safeSet(store: Storage | null, key: string, value: string): void {
-  try { store?.setItem(key, value); } catch { /* noop */ }
+  try {
+    store?.setItem(key, value);
+  } catch {
+    /* noop */
+  }
 }
 function safeRemove(store: Storage | null, key: string): void {
-  try { store?.removeItem(key); } catch { /* noop */ }
+  try {
+    store?.removeItem(key);
+  } catch {
+    /* noop */
+  }
 }
 
 const ls = typeof localStorage !== 'undefined' ? localStorage : null;
@@ -31,12 +43,17 @@ export function setSession(t: string | null, refresh: string | null) {
   else safeRemove(ls, 'campuslink_refresh');
 }
 
-export function getToken() { return token; }
+export function getToken() {
+  return token;
+}
 
-function traceId() { return `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+function traceId() {
+  return `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 const sessionId = (() => {
-  const sid = safeGet(ss, 'campuslink_sid') || `sid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const sid =
+    safeGet(ss, 'campuslink_sid') || `sid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   if (!safeGet(ss, 'campuslink_sid')) safeSet(ss, 'campuslink_sid', sid);
   return sid;
 })();
@@ -50,17 +67,22 @@ async function tryRefresh(): Promise<boolean> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-trace-id': traceId(), 'x-session-id': sessionId },
     body: JSON.stringify({ refresh_token: refreshToken }),
-  }).then(async resp => {
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data.code === 0 && data.data?.token) {
-        setSession(data.data.token, data.data.refresh_token);
-        return true;
+  })
+    .then(async (resp) => {
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.code === 0 && data.data?.token) {
+          setSession(data.data.token, data.data.refresh_token);
+          return true;
+        }
       }
-    }
-    setSession(null, null);
-    return false;
-  }).catch(() => false).finally(() => { refreshPromise = null; });
+      setSession(null, null);
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshPromise = null;
+    });
   return refreshPromise;
 }
 
@@ -68,8 +90,11 @@ async function tryRefresh(): Promise<boolean> {
 async function fetchTO(url: string, options: RequestInit): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
-  try { return await fetch(url, { ...options, signal: ctrl.signal }); }
-  finally { clearTimeout(t); }
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 export interface ApiResponse<T = any> {
@@ -95,21 +120,19 @@ export async function request<T = any>(
   }
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const fetchBody: BodyInit | undefined = isFormData
-    ? (body as FormData)
-    : (body ? JSON.stringify(body) : undefined);
+  const fetchBody: BodyInit | undefined = isFormData ? (body as FormData) : body ? JSON.stringify(body) : undefined;
 
   try {
     let resp = await fetchTO(`${BASE}${path}`, { method, headers, body: fetchBody });
 
-    if (resp.status === 401 && path !== '/auth/refresh' && path !== '/auth/dev-login') {
+    if (resp.status === 401 && path !== '/auth/refresh') {
       const ok = await tryRefresh();
       if (ok && token) {
         headers['Authorization'] = `Bearer ${token}`;
         resp = await fetchTO(`${BASE}${path}`, { method, headers, body: fetchBody });
       }
     }
-    if (resp.status === 401 && path !== '/auth/dev-login') {
+    if (resp.status === 401) {
       setSession(null, null);
       return { code: -1, message: '未登录' };
     }

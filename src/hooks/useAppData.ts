@@ -2,9 +2,9 @@
  * 数据层 — 所有 state、localStorage、服务端数据拉取、计算属性
  */
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Listing, Course, Message, StudentProfile } from '../types';
+import { Listing, Course, CourseOverride, Message, StudentProfile, Content } from '../types';
 import { INITIAL_PROFILE, INITIAL_LISTINGS, INITIAL_COURSES, INITIAL_NOTICES } from '../data';
-import { getToken } from '../utils/api';
+import { getToken, api } from '../utils/api';
 import { coursesApi, postsApi, noticesApi, authApi } from '../api';
 import { safeParseJsonArray } from '../utils/time';
 
@@ -32,7 +32,7 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(`campuslink_${key}`);
     // 清除含 HEIC 的旧 avatar/cover 缓存
-    if (raw && (key === 'profile')) {
+    if (raw && key === 'profile') {
       const parsed = JSON.parse(raw);
       if (parsed.avatarUrl && (parsed.avatarUrl.includes('.heic') || parsed.avatarUrl.includes('.HEIC'))) {
         parsed.avatarUrl = '';
@@ -60,7 +60,9 @@ export function clearStorageCache() {
   try {
     Object.keys(localStorage)
       .filter(
-        (k) => k.startsWith('campuslink_') && !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_schema_version'].includes(k),
+        (k) =>
+          k.startsWith('campuslink_') &&
+          !['campuslink_token', 'campuslink_refresh', 'campuslink_sid', 'campuslink_schema_version'].includes(k),
       )
       .forEach((k) => localStorage.removeItem(k));
   } catch {
@@ -81,6 +83,7 @@ export function useAppData() {
   const [listRefreshing, setListRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('courses', INITIAL_COURSES));
+  const [courseOverrides, setCourseOverrides] = useState<CourseOverride[]>([]);
   const [messages, setMessages] = useState<Message[]>(() => loadFromStorage('messages', []));
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [savedListingIds, setSavedListingIds] = useState<string[]>(() => {
@@ -90,17 +93,28 @@ export function useAppData() {
   });
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [selectedPostType, setSelectedPostType] = useState(() => loadFromStorage('home_filter', 'all'));
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
+
+  // ── 内容运营（R12 Phase 1：新生必看/校园介绍/生活服务/校历，对标竞品链千校）──
+  const [contentsByCat, setContentsByCat] = useState<Record<string, Content[]>>(() =>
+    loadFromStorage('contents_by_cat', {}),
+  );
+  const [bannerItems, setBannerItems] = useState<Content[]>(() => loadFromStorage('banner_items', []));
+  const [contentsLoading, setContentsLoading] = useState(false);
+  const [contentList, setContentList] = useState<{ category: string; subCategory?: string } | null>(null);
+  const [selectedContent, setSelectedContent] = useState<Content | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'info';
+    action?: { label: string; onClick: () => void };
+  } | null>(null);
 
   const lastPublishTime = useRef(0);
-  const reportedPostIds = useRef(new Set<string>());
   const PUBLISH_COOLDOWN = 30000;
   const MAX_POSTS_PER_DAY = 10;
   const MAX_POSTS_UNVERIFIED = 3;
 
-  // Modal + form
+  // Modal
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAddCourseOpen, setIsAddCourseOpen] = useState(false);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -143,7 +157,8 @@ export function useAppData() {
   // ── 服务端数据拉取（缓存优先，无缓存才拉服务端） ──
   const syncCourses = () => {
     if (!getToken()) return;
-    coursesApi.list()
+    coursesApi
+      .list()
       .then((res) => {
         if (res.code === 0 && res.data) {
           const serverCourses = (Array.isArray(res.data) ? res.data : (res.data as any).data || []).map(
@@ -192,11 +207,42 @@ export function useAppData() {
         }
       })
       .catch(() => {});
+    syncOverrides();
   };
+
+  // ── 单次调课记录（随课表一起拉，渲染时用 applyOverrides 叠加） ──
+  const syncOverrides = () => {
+    if (!getToken()) return;
+    coursesApi
+      .listOverrides()
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data)) {
+          setCourseOverrides(
+            res.data.map(
+              (o: any) =>
+                ({
+                  id: o.id,
+                  courseId: String(o.course_id),
+                  week: o.week,
+                  action: o.action,
+                  toWeek: o.to_week,
+                  toWeekday: o.to_weekday,
+                  toStartPeriod: o.to_start_period,
+                  toPeriodSpan: o.to_period_span,
+                  toClassroom: o.to_classroom,
+                }) as CourseOverride,
+            ),
+          );
+        }
+      })
+      .catch(() => {});
+  };
+
   const syncPosts = (page = 1, append = false) => {
     if (listLoading) return;
     setListLoading(true);
-    postsApi.list({ page, limit: 20, type: selectedPostType !== 'all' ? selectedPostType : undefined })
+    postsApi
+      .list({ page, limit: 20, type: selectedPostType !== 'all' ? selectedPostType : undefined })
       .then((res) => {
         if (res.code === 0 && res.data) {
           const serverListings = (res.data.list || []).map(
@@ -227,7 +273,7 @@ export function useAppData() {
                 status: p.status || 'active',
               }) as Listing,
           );
-          setListings(prev => append ? [...prev, ...serverListings] : serverListings);
+          setListings((prev) => (append ? [...prev, ...serverListings] : serverListings));
           setListHasMore(serverListings.length >= 20);
           setListPage(page);
           setListError(null); // 成功清除错误
@@ -242,6 +288,112 @@ export function useAppData() {
       });
   };
 
+  // ── 内容运营（R12）──
+  // 后端 contents 行（snake_case）→ 前端 Content（camelCase）
+  function toContent(row: any): Content {
+    return {
+      id: row.id,
+      category: row.category,
+      subCategory: row.sub_category || '',
+      title: row.title,
+      summary: row.summary || '',
+      coverUrl: row.cover_url || null,
+      resourceUrl: row.resource_url || null,
+      resourceName: row.resource_name || '',
+      body: row.body ?? '',
+      bodyType: row.body_type || 'html',
+      sortOrder: row.sort_order ?? 0,
+      status: row.status,
+      viewCount: row.view_count ?? 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  const fetchContents = useCallback(async () => {
+    // 无缓存守卫：内容数据量小（每类几十条），每次都拉取保证最新；
+    // 网络失败时保留旧缓存兜底（localStorage 已存）。原守卫"有缓存就不拉"
+    // 会导致运营更新内容后用户永远看到旧数据，直到手动下拉刷新。
+    setContentsLoading(true);
+    try {
+      const [bannerR, servicesR, newcomerR, calendarR] = await Promise.all([
+        api.get<any[]>('/contents/banner'),
+        api.get<{ list: any[] }>('/contents?category=services&pageSize=50'),
+        api.get<{ list: any[] }>('/contents?category=newcomer&pageSize=50'),
+        api.get<{ list: any[] }>('/contents?category=calendar&pageSize=50'),
+      ]);
+      if (bannerR.code === 0 && Array.isArray(bannerR.data)) {
+        const banners = bannerR.data.map(toContent);
+        setBannerItems(banners);
+        saveToStorage('banner_items', banners);
+      }
+      setContentsByCat((prev) => {
+        const next = { ...prev };
+        const merge = (key: string, r: { code: number; data?: { list?: any[] } }) => {
+          if (r.code === 0 && Array.isArray(r.data?.list)) {
+            next[key] = r.data.list.map(toContent);
+          }
+        };
+        merge('services', servicesR);
+        merge('newcomer', newcomerR);
+        merge('calendar', calendarR);
+        saveToStorage('contents_by_cat', next);
+        return next;
+      });
+    } catch {
+      // 网络失败静默——localStorage 缓存兜底展示
+    } finally {
+      setContentsLoading(false);
+    }
+  }, []);
+
+  /** 下拉刷新：重拉内容运营数据 */
+  const refreshContents = useCallback(() => {
+    return fetchContents();
+  }, [fetchContents]);
+
+  const openContent = useCallback((c: Content) => {
+    setSelectedContent(c);
+    // 乐观浏览量 +1（后端有同 IP 5 分钟去重兜底）
+    setContentsByCat((prev) => {
+      const list = (prev[c.category] || []).map((x) => (x.id === c.id ? { ...x, viewCount: x.viewCount + 1 } : x));
+      return { ...prev, [c.category]: list };
+    });
+    // 列表接口不返回 body，详情需单独拉取后回填（同时把 body 补进缓存，下次秒开）
+    if (!c.body && c.id) {
+      api
+        .get<any>(`/contents/${c.id}`)
+        .then((r) => {
+          if (r.code === 0 && r.data) {
+            const full = toContent(r.data);
+            setSelectedContent(full);
+            setContentsByCat((prev) => {
+              const list = (prev[full.category] || []).map((x) => (x.id === full.id ? full : x));
+              return { ...prev, [full.category]: list };
+            });
+          }
+        })
+        .catch(() => {
+          /* 拉取失败保持列表数据展示（无 body 区块） */
+        });
+    }
+  }, []);
+
+  const openContentList = useCallback(
+    (category: string, subCategory?: string) => {
+      // 单篇直达：该分类/子分类下只有一篇文章时直接打开详情，跳过列表页（宫格点击体验）
+      if (subCategory) {
+        const matched = (contentsByCat[category] || []).filter((c) => c.subCategory === subCategory);
+        if (matched.length === 1) {
+          openContent(matched[0]);
+          return;
+        }
+      }
+      setContentList({ category, subCategory });
+    },
+    [contentsByCat, openContent],
+  );
+
   const refreshPosts = () => {
     setListRefreshing(true);
     syncPosts(1, false);
@@ -252,7 +404,8 @@ export function useAppData() {
   };
   const syncFavorites = () => {
     if (!getToken() || !profile.studentId) return;
-    postsApi.getFavorites()
+    postsApi
+      .getFavorites()
       .then((res) => {
         if (res.code === 0 && Array.isArray(res.data)) {
           const ids = res.data.map((p: any) => String(p.id));
@@ -288,6 +441,7 @@ export function useAppData() {
   };
 
   // ── 从 notices API 推导消息状态 ──
+  const INTERACTION_CATS = ['circle_like', 'circle_comment', 'circle_reply'];
   const deriveStatus = (title: string, category: string): Message['status'] => {
     if (category === 'approval') {
       if (title.includes('通过')) return 'approved';
@@ -296,6 +450,7 @@ export function useAppData() {
     if (category === 'registration') {
       if (title.includes('报名')) return 'event';
     }
+    if (INTERACTION_CATS.includes(category)) return 'update';
     if (category === 'official') {
       if (title.includes('活动') || title.includes('音乐节')) return 'event';
       return 'update';
@@ -305,7 +460,8 @@ export function useAppData() {
 
   const syncMessages = useCallback(() => {
     if (!getToken()) return;
-    noticesApi.list()
+    noticesApi
+      .list()
       .then((res) => {
         if (res.code === 0 && Array.isArray(res.data)) {
           const serverMessages: Message[] = res.data.map((n: any) => ({
@@ -313,26 +469,37 @@ export function useAppData() {
             title: n.title || '',
             content: n.content || '',
             timeText: formatRelativeTime(n.created_at),
-            category: (n.category === 'approval' ? 'approval' : n.category === 'registration' ? 'registration' : 'official') as Message['category'],
+            category: (INTERACTION_CATS.includes(n.category)
+              ? n.category
+              : n.category === 'approval'
+                ? 'approval'
+                : n.category === 'registration'
+                  ? 'registration'
+                  : 'official') as Message['category'],
             status: deriveStatus(n.title || '', n.category || 'official'),
             isRead: !!n.is_read,
+            targetType: n.target_type || null,
+            targetId: n.target_id || null,
           }));
           setMessages(serverMessages);
         }
       })
       .catch(() => {});
   }, []);
-  // 挂载：无缓存才拉服务端
+  // 挂载：从服务端同步课表（覆盖 localStorage 旧缓存，确保 colorClass 等字段最新）
   useEffect(() => {
     if (!getToken()) return;
-    const cached: any = loadFromStorage('courses', []);
-    if (!cached || !cached.length) syncCourses();
+    syncCourses();
   }, [profile.studentId]);
   useEffect(() => {
     if (!getToken()) return;
     const cached: any = loadFromStorage('listings', []);
     if (!cached || !cached.length) syncPosts(1, false);
   }, [profile.studentId]);
+  // 挂载：内容运营数据（公开接口，无需登录；缓存守卫防重复拉取）
+  useEffect(() => {
+    fetchContents();
+  }, [fetchContents]);
   // 挂载：收藏始终从服务端同步（服务端是权威数据源）
   useEffect(() => {
     if (!profile.studentId) return;
@@ -355,12 +522,19 @@ export function useAppData() {
     };
 
     const stopPolling = () => {
-      if (timer) { clearInterval(timer); timer = null; }
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
     };
 
     const onVisibility = () => {
-      if (document.hidden) { stopPolling(); }
-      else { syncMessages(); startPolling(); }
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        syncMessages();
+        startPolling();
+      }
     };
 
     startPolling();
@@ -380,7 +554,8 @@ export function useAppData() {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const userId = payload?.uid;
       if (!userId) return;
-      authApi.getPublicProfile(userId)
+      authApi
+        .getPublicProfile(userId)
         .then((res) => {
           if (res.code === 0 && res.data) {
             setProfile((prev) => ({
@@ -397,7 +572,9 @@ export function useAppData() {
           }
         })
         .catch(() => {});
-    } catch { /* JWT 解析失败静默 */ }
+    } catch {
+      /* JWT 解析失败静默 */
+    }
   }, [profile.studentId]);
 
   // ── localStorage 持久化（合并为一次写入，避免连续触发多次 setItem）──
@@ -433,7 +610,11 @@ export function useAppData() {
   );
   const savedCount = savedListingIds.length;
 
-  function showToast(message: string, type: 'success' | 'info' = 'success', action?: { label: string; onClick: () => void }) {
+  function showToast(
+    message: string,
+    type: 'success' | 'info' = 'success',
+    action?: { label: string; onClick: () => void },
+  ) {
     setToast({ message, type, action });
     const duration = action ? 5000 : 3000;
     setTimeout(() => setToast(null), duration);
@@ -451,6 +632,8 @@ export function useAppData() {
     setListings,
     courses,
     setCourses,
+    courseOverrides,
+    syncOverrides,
     messages,
     setMessages,
     listLoading,
@@ -467,11 +650,21 @@ export function useAppData() {
     setCarouselIndex,
     selectedPostType,
     setSelectedPostType,
+    // 内容运营（R12）
+    contentsByCat,
+    bannerItems,
+    contentsLoading,
+    contentList,
+    setContentList,
+    selectedContent,
+    setSelectedContent,
+    openContentList,
+    openContent,
+    refreshContents,
     toast,
     showToast,
     // 防刷
     lastPublishTime,
-    reportedPostIds,
     PUBLISH_COOLDOWN,
     MAX_POSTS_PER_DAY,
     MAX_POSTS_UNVERIFIED,
@@ -479,8 +672,6 @@ export function useAppData() {
     // Modal
     isSearchOpen,
     setIsSearchOpen,
-    isAuthModalOpen,
-    setIsAuthModalOpen,
     isAddCourseOpen,
     setIsAddCourseOpen,
     editingCourseId,

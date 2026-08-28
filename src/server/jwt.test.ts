@@ -1,7 +1,7 @@
 /**
  * JWT 工具测试
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 process.env.JWT_SECRET = 'test-jwt-unit-test-secret-key-2026';
 
@@ -39,6 +39,7 @@ describe('signAccessToken / verifyAccessToken', () => {
   });
 
   it('应拒绝过期 token', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const jwt = require('jsonwebtoken');
     const expired = jwt.sign({ uid: 1, admin: false, type: 'access' }, process.env.JWT_SECRET, { expiresIn: '-1s' });
     const payload = verifyAccessToken(expired);
@@ -47,7 +48,7 @@ describe('signAccessToken / verifyAccessToken', () => {
 
   it('应拒绝篡改的 token', () => {
     const token = signAccessToken(1, false);
-    const [header, payload, sig] = token.split('.');
+    const [header, payload] = token.split('.');
     const tampered = [header, payload, 'invalidsig'].join('.');
     const result = verifyAccessToken(tampered);
     expect(result).toBeNull();
@@ -78,6 +79,7 @@ describe('signRefreshToken / verifyRefreshToken', () => {
   });
 
   it('应拒绝过期 refresh token', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const jwt = require('jsonwebtoken');
     const expired = jwt.sign({ uid: 1, type: 'refresh' }, process.env.JWT_SECRET, { expiresIn: '-1s' });
     const payload = verifyRefreshToken(expired);

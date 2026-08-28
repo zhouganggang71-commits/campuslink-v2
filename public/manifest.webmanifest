@@ -1,0 +1,32 @@
+{
+  "name": "川财CampusLink",
+  "short_name": "川财CampusLink",
+  "description": "四川财经职业学院校园信息平台：课表、成绩、二手交易、校园圈、私信",
+  "lang": "zh-CN",
+  "start_url": "/campus/",
+  "scope": "/campus/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#4a90d9",
+  "icons": [
+    {
+      "src": "/campus/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/campus/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/campus/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

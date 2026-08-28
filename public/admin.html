@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>CampusLink 管理后台</title>
+<title>川财CampusLink 管理后台</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f1f5f9;color:#1e293b}
@@ -54,7 +54,7 @@ tr:hover{background:#f8fafc}
 <body>
 
 <div id="login" class="login">
-  <h1>CampusLink 管理后台</h1>
+  <h1>川财CampusLink 管理后台</h1>
   <p>管理员密钥</p>
   <input type="password" id="keyInput" placeholder="输入密钥" autofocus onkeydown="if(event.key==='Enter')login()">
   <button onclick="login()">进入</button>
@@ -88,8 +88,8 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 function enc(s){return s&&s.length>20?'<span class="enc" title="已解密: '+esc(s)+'">'+esc(s.slice(0,8)+'...')+'</span>':esc(s||'-')}
 
 // ── 加载 ──
-const TABS=['overview','posts','users','courses','registrations','favorites','tokens'];
-const TAB_LABELS={overview:'总览',posts:'帖子',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌'};
+const TABS=['overview','posts','circles','users','courses','registrations','favorites','tokens','reports','appeals','pwa','push','contents','transactions'];
+const TAB_LABELS={overview:'总览',posts:'帖子',circles:'校园圈',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌',reports:'举报',appeals:'举报申诉',pwa:'PWA安装',push:'推送广播',contents:'内容管理',transactions:'交易'};
 let curTab='overview';
 
 // ── 自动登录 ──
@@ -129,11 +129,18 @@ function switchTab(tab){
   document.getElementById('tab_'+tab).classList.add('active');
   if(tab==='overview')showOverview();
   if(tab==='posts')fetchPosts();
+  if(tab==='circles')fetchCircleView();
   if(tab==='users')fetchUsers();
   if(tab==='courses')fetchCourses();
   if(tab==='registrations')fetchRegs();
   if(tab==='favorites')fetchFavs();
   if(tab==='tokens')fetchTokens();
+  if(tab==='reports')fetchReports();
+  if(tab==='appeals')fetchAppeals();
+  if(tab==='pwa')fetchPwaStats();
+  if(tab==='push')showPushBroadcast();
+  if(tab==='contents')fetchContents();
+  if(tab==='transactions')fetchTx();
 }
 
 // ── 总览 ──
@@ -159,6 +166,75 @@ function fetchPosts(){
     if(!list.length){h+='<div class="empty">暂无</div>'}else{
       h+=`<table><tr><th>ID</th><th>标题</th><th>发布者</th><th>类型</th><th>状态</th><th>联系方式</th><th>时间</th><th>操作</th></tr>`;
       list.forEach(p=>{h+=`<tr><td>${p.id}</td><td><span class="card" title="${esc(p.title)}">${esc(p.title)}</span></td><td>${esc(p.publisher_name||'')}</td><td>${esc(p.post_type)}</td><td><span class="tag ${p.status}">${p.status}</span></td><td>${enc(p.contact_info)}</td><td>${(p.created_at||'').slice(0,10)}</td><td>${p.status==='pending'?`<button class="btn-sm btn-ok" onclick="act('posts/${p.id}',{status:'active'})">通过</button><button class="btn-sm btn-no" onclick="act('posts/${p.id}',{status:'rejected'})">打回</button>`:p.status==='active'?`<button class="btn-sm btn-no" onclick="act('posts/${p.id}',{status:'closed'})">下架</button>`:'<button class="btn-sm btn-ok" onclick="act(\'posts/'+p.id+'\',{status:\'active\'})">恢复</button>'}</td></tr>`});
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 校园圈帖子/评论（之前后台完全没有查看入口，只能通过举报才间接看到，正常发布的内容一条也看不到）──
+let circleViewMode='posts'; // posts | comments
+function circleViewSwitcher(){
+  var labels={posts:'帖子',comments:'评论'};
+  return '<div class="filter">'+['posts','comments'].map(function(m){
+    return '<button class="'+(circleViewMode===m?'on':'')+'" onclick="circleViewMode=\''+m+'\';fetchCircleView()">'+labels[m]+'</button>';
+  }).join('')+'</div>';
+}
+function fetchCircleView(){
+  if(circleViewMode==='comments')fetchCircleComments();else fetchCirclePosts();
+}
+let circlePostFilter='';
+function fetchCirclePosts(){
+  api('/circle-posts?limit=100'+(circlePostFilter?'&status='+circlePostFilter:'')).then(r=>r.json()).then(d=>{
+    const list=(d.data&&d.data.list)||[];
+    let h=circleViewSwitcher();
+    h+=`<div class="filter">${['','active','hidden','deleted'].map(s=>{
+      var labels={'':'全部',active:'正常',hidden:'已隐藏',deleted:'已删除'};
+      return `<button class="${circlePostFilter===s?'on':''}" onclick="circlePostFilter='${s}';fetchCirclePosts()">${labels[s]}</button>`;
+    }).join('')}</div>`;
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+=`<table><tr><th>ID</th><th>圈子</th><th>内容</th><th>作者</th><th>赞/评论</th><th>状态</th><th>时间</th><th>操作</th></tr>`;
+      list.forEach(function(p){
+        var imgs=Array.isArray(p.images)?p.images.length:0;
+        var preview=esc((p.content||'').slice(0,40))+(imgs?` <span style="color:#94a3b8">[${imgs}图]</span>`:'');
+        h+='<tr><td>'+p.id+'</td><td>'+esc(p.circle_name||p.circle_id)+'</td>'
+          +'<td><span class="card" title="'+esc(p.content||'')+'">'+preview+'</span></td>'
+          +'<td>'+esc(p.nickname)+(p.is_anonymous?' <span style="color:#94a3b8">(该帖匿名发布)</span>':'')+'</td>'
+          +'<td>'+p.like_count+' / '+p.comment_count+'</td>'
+          +'<td><span class="tag '+(p.status==='hidden'?'rejected':p.status==='deleted'?'closed':'active')+'">'+p.status+'</span></td>'
+          +'<td>'+(p.created_at||'').slice(0,16)+'</td>'
+          +'<td>'+(p.status==='active'?'<button class="btn-sm btn-no" onclick="act(\'circle-posts/'+p.id+'\',{status:\'hidden\'})">下架</button>':'<button class="btn-sm btn-ok" onclick="act(\'circle-posts/'+p.id+'\',{status:\'active\'})">恢复</button>')
+          +'</td></tr>';
+      });
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 校园圈评论（照搬帖子模式，同一个"校园圈"tab 内用视图切换按钮共存）──
+let circleCommentFilter='';
+function fetchCircleComments(){
+  api('/circle-comments?limit=100'+(circleCommentFilter?'&status='+circleCommentFilter:'')).then(r=>r.json()).then(d=>{
+    const list=(d.data&&d.data.list)||[];
+    let h=circleViewSwitcher();
+    h+=`<div class="filter">${['','active','hidden','deleted'].map(s=>{
+      var labels={'':'全部',active:'正常',hidden:'已隐藏',deleted:'已删除'};
+      return `<button class="${circleCommentFilter===s?'on':''}" onclick="circleCommentFilter='${s}';fetchCircleComments()">${labels[s]}</button>`;
+    }).join('')}</div>`;
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+=`<table><tr><th>ID</th><th>所属帖子</th><th>评论内容</th><th>作者</th><th>状态</th><th>时间</th><th>操作</th></tr>`;
+      list.forEach(function(c){
+        var postPreview=esc((c.post_content||'').slice(0,20))||'(帖子已不存在)';
+        var content=esc((c.content||'').slice(0,60))+(c.image_url?' <span style="color:#94a3b8">[图]</span>':'');
+        h+='<tr><td>'+c.id+'</td><td><span class="card" title="'+esc(c.post_content||'')+'">'+postPreview+'</span></td>'
+          +'<td><span class="card" title="'+esc(c.content||'')+'">'+content+'</span>'+(c.parent_id?' <span style="color:#94a3b8">(回复)</span>':'')+'</td>'
+          +'<td>'+esc(c.nickname)+'</td>'
+          +'<td><span class="tag '+(c.status==='hidden'?'rejected':c.status==='deleted'?'closed':'active')+'">'+c.status+'</span></td>'
+          +'<td>'+(c.created_at||'').slice(0,16)+'</td>'
+          +'<td>'+(c.status==='active'?'<button class="btn-sm btn-no" onclick="act(\'circle-comments/'+c.id+'\',{status:\'hidden\'})">下架</button>':'<button class="btn-sm btn-ok" onclick="act(\'circle-comments/'+c.id+'\',{status:\'active\'})">恢复</button>')
+          +'</td></tr>';
+      });
       h+='</table>';
     }
     document.getElementById('panel').innerHTML=h;
@@ -253,6 +329,343 @@ function fetchTokens(){
     h+='</table>';
     document.getElementById('panel').innerHTML=h;
   });
+}
+
+// ── 举报 ──
+let reportFilter='pending';
+let reportAccountId='';
+let reportSort='priority'; // priority=举报数多+旧的优先；time=纯按提交时间倒序
+const TARGET_TYPE_LABELS={post:'帖子',circle_post:'圈子帖子',circle_comment:'圈子评论',chat_message:'私信'};
+function fetchReports(){
+  if(reportAccountId){
+    api('/reports/account/'+reportAccountId).then(r=>r.json()).then(d=>{
+      const list=d.data||[];
+      let h='<button onclick="reportAccountId=\'\';fetchReports()" style="margin-bottom:8px;font-size:12px;cursor:pointer;background:#e2e8f0;border:none;padding:5px 12px;border-radius:8px">← 返回举报列表</button>';
+      h+='<h4 style="margin:8px 0">账号 #'+reportAccountId+' 的举报历史（'+list.length+' 条，判断是否惯犯）</h4>';
+      if(!list.length){h+='<div class="empty">暂无</div>'}else{
+        h+='<table><tr><th>类型</th><th>目标ID</th><th>理由</th><th>状态</th><th>时间</th></tr>';
+        list.forEach(function(r){h+='<tr><td>'+(TARGET_TYPE_LABELS[r.target_type]||r.target_type)+'</td><td>'+r.target_id+'</td><td>'+esc(r.reason)+'</td><td><span class="tag '+(r.status==='upheld'?'rejected':r.status==='dismissed'?'active':'pending')+'">'+r.status+'</span></td><td>'+(r.created_at||'').slice(0,16)+'</td></tr>'});
+        h+='</table>';
+      }
+      document.getElementById('panel').innerHTML=h;
+    });
+    return;
+  }
+  api('/reports?limit=100'+(reportFilter?'&status='+reportFilter:'')+'&sort='+reportSort).then(r=>r.json()).then(d=>{
+    const list=(d.data&&d.data.list)||[];
+    let h='<div class="filter">'+['','pending','reviewing','upheld','dismissed'].map(function(s){
+      return '<button class="'+(reportFilter===s?'on':'')+'" onclick="reportFilter=\''+s+'\';fetchReports()">'+(s||'全部')+'</button>';
+    }).join('')+'</div>';
+    h+='<div class="filter" style="margin-top:-4px">排序：'
+      +['priority','time'].map(function(s){
+        return '<button class="'+(reportSort===s?'on':'')+'" onclick="reportSort=\''+s+'\';fetchReports()">'+(s==='priority'?'优先级(举报数多+旧的优先)':'最新提交')+'</button>';
+      }).join('')+'</div>';
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+='<table><tr><th>类型</th><th>内容预览</th><th>理由</th><th>举报人</th><th>举报数</th><th>状态</th><th>时间</th><th>操作</th></tr>';
+      list.forEach(function(r){
+        h+='<tr><td>'+(TARGET_TYPE_LABELS[r.targetType]||r.targetType)+'</td>'
+          +'<td><span class="card" title="'+esc(r.targetPreview)+'">'+esc(r.targetPreview)+'</span></td>'
+          +'<td>'+esc(r.reason)+(r.reasonDetail?'<br><span style="color:#94a3b8">'+esc(r.reasonDetail)+'</span>':'')+'</td>'
+          +'<td>'+esc(r.reporterNickname)+'</td>'
+          +'<td>'+(r.reportCount>1?'<span class="tag rejected" title="'+r.reportCount+'个不同人举报">'+r.reportCount+'</span>':r.reportCount)
+          +(r.hasPendingAppeal?' <span class="tag pending" title="作者已提交申诉，待审核">申诉中</span>':'')+'</td>'
+          +'<td><span class="tag '+(r.status==='upheld'?'rejected':r.status==='dismissed'?'active':'pending')+'">'+r.status+'</span></td>'
+          +'<td>'+(r.createdAt||'').slice(0,16)+'</td>'
+          +'<td>'
+          +(r.targetOwnerId?'<button class="btn-sm" style="background:#e2e8f0" onclick="reportAccountId=\''+r.targetOwnerId+'\';fetchReports()">该账号历史</button>':'')
+          +(r.status==='pending'||r.status==='reviewing'?'<button class="btn-sm btn-no" onclick="resolveReport('+r.id+',\'upheld\')">成立(下架)</button><button class="btn-sm btn-ok" onclick="resolveReport('+r.id+',\'dismissed\')">驳回(恢复)</button>':'')
+          +'</td></tr>';
+      });
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+function resolveReport(id,status){
+  api('/reports/'+id,{method:'PUT',body:JSON.stringify({status:status})}).then(r=>r.json()).then(d=>{toast(d.message||'已处理');fetchReports()});
+}
+
+// ── 举报申诉（内容作者对自动/人工软隐藏提出异议，管理员审核通过=恢复可见，驳回=维持隐藏）──
+let appealFilter='pending';
+function fetchAppeals(){
+  api('/report-appeals?status='+appealFilter).then(r=>r.json()).then(d=>{
+    const list=d.data||[];
+    let h='<div class="filter">'+['pending','approved','rejected'].map(function(s){
+      var labels={pending:'待审核',approved:'已通过',rejected:'已驳回'};
+      return '<button class="'+(appealFilter===s?'on':'')+'" onclick="appealFilter=\''+s+'\';fetchAppeals()">'+labels[s]+'</button>';
+    }).join('')+'</div>';
+    if(!list.length){h+='<div class="empty">暂无</div>'}else{
+      h+='<table><tr><th>类型</th><th>内容预览</th><th>申诉人</th><th>申诉理由</th><th>时间</th><th>操作</th></tr>';
+      list.forEach(function(a){
+        h+='<tr><td>'+(TARGET_TYPE_LABELS[a.targetType]||a.targetType)+'</td>'
+          +'<td><span class="card" title="'+esc(a.targetPreview)+'">'+esc(a.targetPreview)+'</span></td>'
+          +'<td>'+esc(a.nickname)+' ('+esc(a.studentId)+')</td>'
+          +'<td>'+esc(a.appealText)+(a.adminNote?'<br><span style="color:#94a3b8">备注：'+esc(a.adminNote)+'</span>':'')+'</td>'
+          +'<td>'+(a.createdAt||'').slice(0,16)+'</td>'
+          +'<td>'+(a.status==='pending'?'<button class="btn-sm btn-ok" onclick="resolveAppeal('+a.id+',\'approved\')">通过(恢复)</button><button class="btn-sm btn-no" onclick="resolveAppeal('+a.id+',\'rejected\')">驳回(维持隐藏)</button>':'')
+          +'</td></tr>';
+      });
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+function resolveAppeal(id,status){
+  var note=status==='rejected'?prompt('驳回理由（可选，会展示给用户）：')||'':'';
+  api('/report-appeals/'+id,{method:'PUT',body:JSON.stringify({status:status,adminNote:note})}).then(r=>r.json()).then(d=>{toast(d.message||'已处理');fetchAppeals()});
+}
+
+// ── PWA 安装统计 ──
+function fetchPwaStats(){
+  const p=document.getElementById('panel');
+  p.innerHTML='<div class="loading">加载中...</div>';
+  api('/pwa-install-stats').then(r=>r.json()).then(d=>{
+    if(d.code!==0){p.innerHTML='<div class="loading">加载失败</div>';return;}
+    const s=d.data;
+    let h=`
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <div style="background:#fff;border-radius:12px;padding:14px 20px;flex:1;min-width:100px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#1e293b">${s.total}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">总事件数</div>
+        </div>
+        <div style="background:#fff;border-radius:12px;padding:14px 20px;flex:1;min-width:100px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#2563eb">${s.shown}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">展示次数</div>
+        </div>
+        <div style="background:#fff;border-radius:12px;padding:14px 20px;flex:1;min-width:100px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#16a34a">${s.accepted}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">安装成功</div>
+        </div>
+        <div style="background:#fff;border-radius:12px;padding:14px 20px;flex:1;min-width:100px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:${s.rate<20?'#dc2626':'#16a34a'}">${s.rate}%</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">安装转化率</div>
+        </div>
+        <div style="background:#fff;border-radius:12px;padding:14px 20px;flex:1;min-width:100px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#f59e0b">${s.dismissed}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px">关闭次数</div>
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:12px;padding:16px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#1e293b">各事件分布</div>
+        <table>
+          <thead><tr><th>事件类型</th><th>次数</th></tr></thead>
+          <tbody>`;
+    const typeLabels={shown:'展示',native_clicked:'点击安装',native_accepted:'安装成功',native_dismissed:'安装弹窗关闭',manual_opened:'查看手动教程',manual_guide_viewed:'查看指引',dismissed:'关闭横幅'};
+    s.byType.forEach(r=>{
+      h+=`<tr><td>${typeLabels[r.event_type]||r.event_type}</td><td>${r.c}</td></tr>`;
+    });
+    h+=`</tbody></table></div>
+      <div style="background:#fff;border-radius:12px;padding:16px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#1e293b">近14天趋势</div>
+        <table>
+          <thead><tr><th>日期</th><th>事件数</th></tr></thead>
+          <tbody>`;
+    s.byDay.forEach(r=>{
+      h+=`<tr><td>${r.day}</td><td>${r.c}</td></tr>`;
+    });
+    h+=`</tbody></table></div>`;
+    p.innerHTML=h;
+  }).catch(()=>{p.innerHTML='<div class="loading">加载失败</div>'});
+}
+
+// ── 推送广播（出分播报等运营场景手动触发；不存教务凭据无法自动判定"是否已出分"，
+//    这里只承认这个限制，做成人工确认后一次性群发，不是自动化通知）──
+function showPushBroadcast(){
+  document.getElementById('panel').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;max-width:480px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:#1e293b">测试推送（单个用户）</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">按学号定位一个用户单独发一条，用来验证推送链路，不影响其他人</div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">学号</div>
+        <input id="tuStudentId" placeholder="例如 202330140113" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">标题</div>
+        <input id="tuTitle" value="川财CampusLink" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">内容（最多200字）</div>
+        <textarea id="tuBody" rows="2" placeholder="这是一条测试推送" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <button class="btn-sm btn-ok" onclick="sendTestUserPush()">发送测试</button>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:16px;max-width:480px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:#1e293b">推送广播</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">发给全部已开启通知的设备，谨慎使用，发出后不可撤回</div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">标题</div>
+        <input id="bcTitle" value="川财CampusLink" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">内容（最多200字）</div>
+        <textarea id="bcBody" rows="3" placeholder="例如：预计已出分，打开 App 扫码同步查看" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <button class="btn-sm btn-ok" onclick="sendBroadcast()">发送广播</button>
+    </div>`;
+}
+function sendTestUserPush(){
+  const studentId=document.getElementById('tuStudentId').value.trim();
+  const title=document.getElementById('tuTitle').value.trim()||'川财CampusLink';
+  const body=document.getElementById('tuBody').value.trim()||'这是一条测试推送';
+  if(!studentId){toast('请输入学号');return}
+  api('/push/test-user',{method:'POST',body:JSON.stringify({studentId,title,body})}).then(r=>r.json()).then(d=>{
+    toast(d.message||(d.code===0?'已发送':'发送失败'));
+  }).catch(()=>toast('发送失败'));
+}
+function sendBroadcast(){
+  const title=document.getElementById('bcTitle').value.trim()||'川财CampusLink';
+  const body=document.getElementById('bcBody').value.trim();
+  if(!body){toast('内容不能为空');return}
+  if(!confirm('确认发送给全部已开启通知的设备？发出后不可撤回。'))return;
+  api('/push/broadcast',{method:'POST',body:JSON.stringify({title,body})}).then(r=>r.json()).then(d=>{
+    toast(d.message||(d.code===0?'已发送':'发送失败'));
+  }).catch(()=>toast('发送失败'));
+}
+
+
+// ── 交易管理（面交交易）──
+let txStatusFilter='';
+function fetchTx(){
+  api('/transactions?limit=100'+(txStatusFilter?'&status='+txStatusFilter:'')).then(r=>r.json()).then(d=>{
+    const list=(d.data&&d.data.list)||[];
+    const labels={pending:'待确认',code_issued:'待面交',completed:'已完成',cancelled:'已取消',disputed:'纠纷中'};
+    let h='<div class="filter">';
+    ['','pending','code_issued','completed','disputed','cancelled'].forEach(function(s){
+      h+='<button class="'+(txStatusFilter===s?'on':'')+'" onclick="txStatusFilter=\''+s+'\';fetchTx()">'+(s?labels[s]:'全部')+'</button>';
+    });
+    h+='</div>';
+    if(!list.length){h+='<div class="empty">暂无交易</div>'}else{
+      h+='<table><tr><th>ID</th><th>商品</th><th>卖家</th><th>买家</th><th>价格</th><th>状态</th><th>面交码</th><th>创建</th><th>操作</th></tr>';
+      list.forEach(function(t){
+        var st=t.status==='completed'?'active':(t.status==='disputed'?'rejected':t.status);
+        h+='<tr><td>'+t.id+'</td>'
+          +'<td><span class="card" title="'+esc(t.post_title)+'">'+esc(t.post_title)+'</span></td>'
+          +'<td>'+esc(t.seller_name)+'</td><td>'+esc(t.buyer_name)+'</td>'
+          +'<td>'+(t.post_price?'¥'+t.post_price:'-')+'</td>'
+          +'<td><span class="tag '+st+'">'+(labels[t.status]||t.status)+'</span></td>'
+          +'<td>'+(t.face_code?'<b>'+t.face_code+'</b>':'-')+'</td>'
+          +'<td>'+(t.created_at||'').slice(0,16)+'</td>'
+          +'<td>'+(['pending','code_issued','disputed'].indexOf(t.status)>=0?
+              '<button class="btn-sm btn-ok" onclick="act(\'transactions/'+t.id+'/status\',{status:\'completed\'})">完成</button>'+
+              '<button class="btn-sm btn-no" onclick="act(\'transactions/'+t.id+'/status\',{status:\'cancelled\'})">取消</button>':'')
+          +'</td></tr>';
+      });
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+// ── 内容管理（新生必看/校园介绍/生活服务/校历，R12 Phase 1）──
+let contentFilter='';
+let contentStatusFilter='';
+let contentSort='sort';
+const CONTENT_CAT_LABELS={newcomer:'新生必看',campus_intro:'校园介绍',services:'生活服务',calendar:'校历'};
+const CONTENT_SUB_OPTIONS={
+  newcomer:[['dorm','宿舍生活'],['checklist','必备清单'],['route','到校路线'],['network','校园网络'],['food','餐饮美食'],['report','报道流程'],['exam','入学考试'],['club','社团部门'],['military','军训攻略'],['wall','校园表白墙']],
+  campus_intro:[['scenery','校园风光'],['major','学院专业']],
+  services:[['life','生活服务'],['transfer','转专业'],['contest','竞赛证书'],['study','日常学业'],['love','恋爱社交'],['scholarship','奖助学金'],['phone','部门电话'],['banner','Banner轮播']],
+  calendar:[['term','学期校历']]
+};
+function contentSubOptions(cat){return (CONTENT_SUB_OPTIONS[cat]||[]).map(o=>`<option value="${esc(o[0]).replace(/'/g,'&#39;')}">${esc(o[1])}</option>`).join('')}
+
+function fetchContents(){
+  let q='limit=100';
+  if(contentFilter)q+='&category='+contentFilter;
+  if(contentStatusFilter)q+='&status='+contentStatusFilter;
+  if(contentSort!=='sort')q+='&sort='+contentSort;
+  api('/contents?'+q).then(r=>r.json()).then(d=>{
+    const list=(d.data&&d.data.list)||[];
+    let h=`<div class="filter"><button class="${contentFilter===''?'on':''}" onclick="contentFilter='';fetchContents()">全部</button>`;
+    Object.keys(CONTENT_CAT_LABELS).forEach(c=>{h+=`<button class="${contentFilter===c?'on':''}" onclick="contentFilter='${c}';fetchContents()">${CONTENT_CAT_LABELS[c]}</button>`});
+    h+=`<button class="${contentStatusFilter==='published'?'on':''}" onclick="contentStatusFilter=contentStatusFilter==='published'?'':'published';fetchContents()">仅已发布</button>`;
+    h+=`<button class="${contentSort==='views'?'on':''}" onclick="contentSort=contentSort==='views'?'sort':'views';fetchContents()">按浏览排序</button>`;
+    h+=`<button class="btn-sm btn-ok" style="margin-left:auto" onclick="showContentForm()">+ 新建内容</button></div>`;
+    if(!list.length){h+='<div class="empty">暂无内容，点击右上角新建</div>'}else{
+      h+='<table><tr><th>ID</th><th>标题</th><th>分类</th><th>子分类</th><th>状态</th><th>浏览</th><th>排序</th><th>更新</th><th>操作</th></tr>';
+      list.forEach(function(p){
+        var st=p.status==='published'?'active':p.status;
+        h+='<tr><td>'+p.id+'</td>'
+          +'<td><span class="card" title="'+esc(p.title)+'">'+esc(p.title)+'</span></td>'
+          +'<td>'+(CONTENT_CAT_LABELS[p.category]||p.category)+'</td>'
+          +'<td>'+esc(p.sub_category||'-')+'</td>'
+          +'<td><span class="tag '+st+'">'+(p.status==='published'?'已发布':p.status==='draft'?'草稿':'已归档')+'</span></td>'
+          +'<td>'+p.view_count+'</td>'
+          +'<td>'+p.sort_order+'</td>'
+          +'<td>'+(p.updated_at||'').slice(0,10)+'</td>'
+          +'<td><button class="btn-sm btn-ok" onclick="showContentForm('+p.id+')">编辑</button>'
+          +'<button class="btn-sm btn-no" onclick="delContent('+p.id+')">删除</button></td></tr>';
+      });
+      h+='</table>';
+    }
+    document.getElementById('panel').innerHTML=h;
+  });
+}
+
+let editingContentId=null;
+function showContentForm(id){
+  editingContentId=id||null;
+  if(id){api('/contents?limit=200').then(r=>r.json()).then(function(d){
+    var list=(d.data&&d.data.list)||[];
+    var p=list.find(function(x){return x.id===id});
+    if(p)renderContentForm(p);
+  });}
+  else renderContentForm(null);
+}
+function renderContentForm(p){
+  var isEdit=!!p;
+  var cat=p?p.category:'newcomer';
+  var h='<div style="background:#fff;border-radius:12px;padding:16px;max-width:640px">';
+  h+='<div style="font-size:13px;font-weight:700;margin-bottom:12px;color:#1e293b">'+(isEdit?'编辑内容 #'+p.id:'新建内容')+'</div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">分类</div><select id="cfCat" onchange="syncContentSub()">'+Object.keys(CONTENT_CAT_LABELS).map(function(c){return '<option value="'+c+'"'+(c===cat?' selected':'')+'>'+CONTENT_CAT_LABELS[c]+'</option>'}).join('')+'</select></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">子分类</div><select id="cfSub">'+(isEdit?contentSubOptions(cat).replace('value="'+p.sub_category+'"','value="'+p.sub_category+'" selected'):contentSubOptions(cat))+'</select></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">标题</div><input id="cfTitle" value="'+esc((p&&p.title)||'')+'" placeholder="例如：新生报到流程全攻略" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">摘要（列表卡片展示，选填）</div><input id="cfSummary" value="'+esc((p&&p.summary)||'')+'" placeholder="一句话介绍这篇文章" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">封面图 URL（选填，图片地址）</div><input id="cfCover" value="'+esc((p&&p.cover_url)||'')+'" placeholder="https://..." style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">资料文件 URL（选填，新生资料库下载）</div><input id="cfResUrl" value="'+esc((p&&p.resource_url)||'')+'" placeholder="https://... 或 /uploads/xxx.pdf" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">资料文件名（选填，如：开学考试资料.pdf）</div><input id="cfResName" value="'+esc((p&&p.resource_name)||'')+'" placeholder="显示在下载按钮上" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">正文 <span style="color:#94a3b8">'+(cat==='calendar'?'（校历 JSON，格式见说明）':'（HTML，支持 &lt;img&gt; &lt;h2&gt; &lt;p&gt; 等）')+'</span></div><textarea id="cfBody" rows="10" placeholder="'+((cat==='calendar')?'{"termName":"2026-2027学年 秋季学期","startDate":"2026-09-01","endDate":"2027-01-15","holidays":[],"examWeeks":[]}':'<p>正文内容...</p>')+'" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:monospace;resize:vertical">'+esc((p&&p.body)||'')+'</textarea></div>';
+  h+='<div style="margin-bottom:10px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">排序（越小越靠前）</div><input id="cfSort" type="number" value="'+(p?(p.sort_order||0):0)+'" style="width:100px;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px"></div>';
+  h+='<div style="margin-bottom:12px"><div style="font-size:11px;color:#64748b;margin-bottom:4px">状态</div><select id="cfStatus">'+['draft','published','archived'].map(function(s){return '<option value="'+s+'"'+(p&&p.status===s?' selected':'')+'>'+(s==='published'?'已发布':s==='draft'?'草稿':'已归档')+'</option>'}).join('')+'</select></div>';
+  h+='<button class="btn-sm btn-ok" onclick="saveContent()">保存</button> <button class="btn-sm" style="background:#64748b;color:#fff" onclick="fetchContents()">取消</button>';
+  if(cat==='calendar')h+='<div style="font-size:11px;color:#94a3b8;margin-top:10px">校历 JSON 说明：termName 学期名 / startDate endDate 学期起止(YYYY-MM-DD) / holidays 节假日[{name,start,end}] / examWeeks 考试周[{name,weekStart,weekEnd}]</div>';
+  h+='</div>';
+  document.getElementById('panel').innerHTML=h;
+}
+function syncContentSub(){
+  var cat=document.getElementById('cfCat').value;
+  document.getElementById('cfSub').innerHTML=contentSubOptions(cat);
+  var body=document.getElementById('cfBody');
+  var isCal=cat==='calendar';
+  if(isCal&&!body.value.trim())body.placeholder='{"termName":"2026-2027学年 秋季学期","startDate":"2026-09-01","endDate":"2027-01-15","holidays":[],"examWeeks":[]}';
+}
+function saveContent(){
+  var cat=document.getElementById('cfCat').value;
+  var payload={
+    category:cat,
+    subCategory:document.getElementById('cfSub').value,
+    title:document.getElementById('cfTitle').value.trim(),
+    summary:document.getElementById('cfSummary').value.trim(),
+    coverUrl:document.getElementById('cfCover').value.trim()||null,
+    resourceUrl:document.getElementById('cfResUrl').value.trim()||null,
+    resourceName:document.getElementById('cfResName').value.trim(),
+    body:document.getElementById('cfBody').value,
+    bodyType:(cat==='calendar')?'calendar_json':'html',
+    sortOrder:parseInt(document.getElementById('cfSort').value)||0,
+    status:document.getElementById('cfStatus').value
+  };
+  if(!payload.title){toast('标题不能为空');return}
+  if(!payload.body.trim()){toast('正文不能为空');return}
+  var path=editingContentId?'/contents/'+editingContentId:'/contents';
+  var method=editingContentId?'PUT':'POST';
+  api(path,{method:method,body:JSON.stringify(payload)}).then(r=>r.json()).then(function(d){
+    toast(d.message||(editingContentId?'已保存':'已创建'));
+    fetchContents();
+  });
+}
+function delContent(id){
+  if(!confirm('确认删除内容 #'+id+'？删除后不可恢复'))return;
+  api('/contents/'+id,{method:'DELETE'}).then(r=>r.json()).then(function(d){toast(d.message||'已删除');fetchContents();});
 }
 
 // ── 通用操作 ──

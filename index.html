@@ -7,22 +7,30 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>四川财经职业学院 · CampusLink</title>
-    <script>
-      var BUILD = '20260703000011';
+    <!-- PWA：manifest + iOS 加桌面支持 -->
+    <link rel="manifest" href="/campus/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/campus/pwa-192x192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="川财CampusLink" />
+    <title>川财CampusLink</title>
+    <script nonce="CSP_NONCE">
+      var BUILD = '20260828183425';
       var prev = localStorage.getItem('campuslink_build');
       if (prev && prev !== BUILD) {
         var keys = [];
         for (var i = 0; i < localStorage.length; i++) {
           var k = localStorage.key(i);
-          if (k && k.startsWith('campuslink_') && k !== 'campuslink_token' && k !== 'campuslink_refresh' && k !== 'campuslink_sid' && k !== 'campuslink_profile') keys.push(k);
+          if (k && k.startsWith('campuslink_') && k !== 'campuslink_token' && k !== 'campuslink_refresh' && k !== 'campuslink_sid' && k !== 'campuslink_profile' && k !== 'campuslink_a2hs_dismissed' && k !== 'campuslink_push_dismissed') keys.push(k);
         }
         keys.forEach(function(k) { localStorage.removeItem(k); });
       }
       localStorage.setItem('campuslink_build', BUILD);
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-          for (var r of regs) r.unregister();
+      // PWA：注册 SW（保守缓存策略，只缓存带 hash 的 assets，index.html 永不缓存）
+      // 仅 https 下注册 —— 生产是 https，dev(http) 不注册避免干扰 HMR
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/campus/sw.js', { scope: '/campus/' }).catch(function() {});
         });
       }
     </script>

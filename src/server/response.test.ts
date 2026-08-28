@@ -1,7 +1,7 @@
 /**
  * 服务端验证工具测试
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
 // 直接测试 validate 函数的行为——不依赖 express
