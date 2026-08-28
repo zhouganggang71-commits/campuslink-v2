@@ -50,3 +50,20 @@ export async function pollWechatLogin(sessionId: string): Promise<WechatPollResp
   if (data.code !== 0) throw new Error(data.message || '登录失败');
   return data.data;
 }
+
+/**
+ * 主动放弃一个扫码会话（用户取消/关闭弹窗/重新扫码前），让服务端立即释放浏览器，
+ * 不用等 7 分钟超时清理器——不这么做的话，用户多点几次"重新扫码"就会把并发配额占满，
+ * 表现成"明明只有我一个人在扫却提示人数过多"。失败静默忽略，不影响用户当前操作。
+ */
+export async function cancelWechatLogin(sessionId: string): Promise<void> {
+  try {
+    await fetch(BASE + '/wechat-cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    });
+  } catch {
+    /* 尽力而为，网络异常不阻塞用户操作，服务端超时清理器兜底 */
+  }
+}

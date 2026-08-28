@@ -15,7 +15,9 @@ function loadDraft(): Record<string, string> | null {
     // 至少有一条实质内容才算有效草稿
     if (parsed.title || parsed.description || parsed.imageUrl) return parsed;
     return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function saveDraft(form: Record<string, string>) {
@@ -24,11 +26,17 @@ function saveDraft(form: Record<string, string>) {
     if (form.title || form.description || form.imageUrl) {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
     }
-  } catch { /* localStorage 不可用时静默 */ }
+  } catch {
+    /* localStorage 不可用时静默 */
+  }
 }
 
 function clearDraft() {
-  try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* 忽略 */
+  }
 }
 
 // ── 简易 debounce（零依赖） ──
@@ -38,14 +46,17 @@ function useDebounce<T extends (...args: any[]) => void>(fn: T, delay: number): 
   fnRef.current = fn;
   const lastArgsRef = useRef<any[] | null>(null);
 
-  const debounced = useCallback((...args: any[]) => {
-    lastArgsRef.current = args;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      fnRef.current(...(lastArgsRef.current || []));
-      lastArgsRef.current = null;
-    }, delay);
-  }, [delay]) as any;
+  const debounced = useCallback(
+    (...args: any[]) => {
+      lastArgsRef.current = args;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        fnRef.current(...(lastArgsRef.current || []));
+        lastArgsRef.current = null;
+      }, delay);
+    },
+    [delay],
+  ) as any;
 
   debounced.flush = useCallback(() => {
     if (timerRef.current) {
@@ -85,7 +96,14 @@ interface PublishTabProps {
   showToast?: (msg: string, type?: 'success' | 'info') => void;
 }
 
-export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, editListing, showToast }: PublishTabProps) {
+export default function PublishTab({
+  onPublish,
+  onCancel,
+  isOrg,
+  isVerified,
+  editListing,
+  showToast,
+}: PublishTabProps) {
   const DEFAULT_FORM: Record<string, string> = {
     postType: 'sell',
     title: '',
@@ -207,8 +225,13 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
         const MAX = 1920;
         let { width, height } = img;
         if (width > MAX || height > MAX) {
-          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
-          else { width = Math.round(width * MAX / height); height = MAX; }
+          if (width > height) {
+            height = Math.round((height * MAX) / width);
+            width = MAX;
+          } else {
+            width = Math.round((width * MAX) / height);
+            height = MAX;
+          }
         }
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -216,12 +239,19 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('Canvas 不可用'));
         ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('压缩失败'));
-        }, 'image/jpeg', 0.8);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('压缩失败'));
+          },
+          'image/jpeg',
+          0.8,
+        );
       };
-      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('图片加载失败')); };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('图片加载失败'));
+      };
       img.src = objectUrl;
     });
   };
@@ -240,11 +270,13 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
       const blob = file.size > 500 * 1024 ? await compressImage(file) : file;
       const formData = new FormData();
       formData.append('file', blob, blob instanceof File ? blob.name : 'compressed.jpg');
-      const res = await uploadApi.uploadImage(formData) as any;
+      const res = (await uploadApi.uploadImage(formData)) as any;
       if (res.code === 0 && res.data?.url) {
         update({ imageUrl: res.data.url });
       }
-    } catch { /* 静默 */ }
+    } catch {
+      /* 静默 */
+    }
     finishProgress();
     setUploadingImage(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -392,10 +424,24 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
               <span className="text-xs font-semibold text-primary">检测到未发布的草稿</span>
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => { clearDraft(); setForm({ ...DEFAULT_FORM }); setShowDraftPrompt(false); }}
-                className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer px-2 py-1">丢弃</button>
-              <button type="button" onClick={() => setShowDraftPrompt(false)}
-                className="text-[10px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-3 py-1 cursor-pointer">继续编辑</button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearDraft();
+                  setForm({ ...DEFAULT_FORM });
+                  setShowDraftPrompt(false);
+                }}
+                className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer px-2 py-1"
+              >
+                丢弃
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDraftPrompt(false)}
+                className="text-[10px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-3 py-1 cursor-pointer"
+              >
+                继续编辑
+              </button>
             </div>
           </div>
         )}
@@ -720,9 +766,12 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
           {ft('imageUrl') ? (
             <div className="relative w-32 h-32 rounded-xl overflow-hidden bg-slate-100 border border-gray-200">
               <img src={ft('imageUrl')} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              <button type="button" onClick={() => update({ imageUrl: '' })}
+              <button
+                type="button"
+                onClick={() => update({ imageUrl: '' })}
                 className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center cursor-pointer transition-colors"
-                aria-label="移除图片">
+                aria-label="移除图片"
+              >
                 <Icon name="close" className="text-white text-xs" />
               </button>
             </div>
@@ -748,10 +797,14 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
                 ) : (
                   <Icon name="add_a_photo" className="text-2xl text-gray-400" />
                 )}
-                <span className="text-xs text-gray-400">{uploadingImage ? '' : '点击上传图片（支持 JPG/PNG/WebP，最大 10MB）'}</span>
+                <span className="text-xs text-gray-400">
+                  {uploadingImage ? '' : '点击上传图片（支持 JPG/PNG/WebP，最大 10MB）'}
+                </span>
               </div>
               <details className="group">
-                <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600 select-none">或粘贴图片链接</summary>
+                <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+                  或粘贴图片链接
+                </summary>
                 <input
                   type="url"
                   placeholder="https://..."
@@ -790,7 +843,10 @@ export default function PublishTab({ onPublish, onCancel, isOrg, isVerified, edi
         <div className="pt-2 flex gap-3">
           <button
             type="button"
-            onClick={() => { clearDraft(); onCancel(); }}
+            onClick={() => {
+              clearDraft();
+              onCancel();
+            }}
             className="flex-1 py-2.5 bg-slate-100 text-gray-600 font-semibold text-xs rounded-lg active:scale-95 cursor-pointer"
           >
             取消

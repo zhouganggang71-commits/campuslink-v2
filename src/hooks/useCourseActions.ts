@@ -8,6 +8,7 @@ import { useOptimistic } from './useOptimistic';
 interface CourseDataLayer {
   courses: Course[];
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
+  syncCourses: () => void;
   setIsShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setShareWeek: React.Dispatch<React.SetStateAction<number>>;
   setIsAddCourseOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -82,10 +83,9 @@ export function useCourseActions(d: CourseDataLayer) {
     // ── 编辑模式：乐观更新 + PUT ──
     if (d.editingCourseId) {
       const prevCourses = d.courses;
-      d.setCourses(d.courses.map((c) =>
-        c.id === d.editingCourseId ? { ...c, ...courseData } : c,
-      ));
-      coursesApi.update(d.editingCourseId!, courseData)
+      d.setCourses(d.courses.map((c) => (c.id === d.editingCourseId ? { ...c, ...courseData } : c)));
+      coursesApi
+        .update(d.editingCourseId!, courseData)
         .then(() => d.showToast('课程已更新', 'success'))
         .catch(() => {
           d.setCourses(prevCourses);
@@ -93,7 +93,19 @@ export function useCourseActions(d: CourseDataLayer) {
         });
       d.setEditingCourseId(null);
       d.setIsAddCourseOpen(false);
-      d.setCourseForm({ name: '', teacher: '', classroom: '', weekday: 3, startPeriod: 3, periodSpan: 2, weekStart: 1, weekEnd: 18, weekType: 'all', courseType: 'theory', colorClass: 'bg-course-blue text-white' });
+      d.setCourseForm({
+        name: '',
+        teacher: '',
+        classroom: '',
+        weekday: 3,
+        startPeriod: 3,
+        periodSpan: 2,
+        weekStart: 1,
+        weekEnd: 18,
+        weekType: 'all',
+        courseType: 'theory',
+        colorClass: 'bg-course-blue text-white',
+      });
       return;
     }
 
@@ -104,7 +116,8 @@ export function useCourseActions(d: CourseDataLayer) {
       ...courseData,
     };
     d.setCourses([...d.courses, newCourse]);
-    coursesApi.create({ ...newCourse, id: undefined } as any)
+    coursesApi
+      .create({ ...newCourse, id: undefined } as any)
       .then(() => d.showToast('课程已添加！', 'success'))
       .catch((err) => {
         console.error('[handleAddCourse]', err);
@@ -128,15 +141,10 @@ export function useCourseActions(d: CourseDataLayer) {
   };
 
   const handleDeleteCourse = (id: string) => {
-    runDelete(
-      d.setCourses,
-      id,
-      () => coursesApi.delete(id),
-      {
-        onSuccess: () => d.showToast('课程已删除', 'info'),
-        onError: () => d.showToast('删除失败，请重试', 'info'),
-      },
-    );
+    runDelete(d.setCourses, id, () => coursesApi.delete(id), {
+      onSuccess: () => d.showToast('课程已删除', 'info'),
+      onError: () => d.showToast('删除失败，请重试', 'info'),
+    });
   };
 
   const handleImportCourses = async (imported: Omit<Course, 'id'>[]) => {
@@ -156,6 +164,8 @@ export function useCourseActions(d: CourseDataLayer) {
   const handleShareSchedule = (week: number) => {
     d.setShareWeek(week);
     d.setIsShareModalOpen(true);
+    // 分享前同步服务端课表数据，确保 colorClass 等字段最新
+    d.syncCourses();
   };
 
   return {

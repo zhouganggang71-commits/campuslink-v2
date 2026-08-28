@@ -3,7 +3,7 @@
  *
  * 用法: npx tsx scripts/stress_test.ts [URL] [并发数]
  * 示例: npx tsx scripts/stress_test.ts http://127.0.0.1:3002/campus 100
- *       npx tsx scripts/stress_test.ts https://jhcaishui.cn:8443/campus 500
+ *       npx tsx scripts/stress_test.ts https://jhcaishui.cn/campus 500
  *
  * 默认: http://127.0.0.1:3002/campus  并发: 200
  */

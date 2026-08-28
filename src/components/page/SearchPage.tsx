@@ -18,18 +18,19 @@ function loadHistory(): string[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 function saveHistory(terms: string[]) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(terms)); } catch {}
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(terms));
+  } catch {
+    /* 忽略 */
+  }
 }
 
-export default function SearchPage({
-  savedListingIds,
-  onOpenDetail,
-  onClose,
-  postTypeLabel,
-}: SearchPageProps) {
+export default function SearchPage({ savedListingIds, onOpenDetail, onClose, postTypeLabel }: SearchPageProps) {
   const [query, setQuery] = useState('');
   const [posts, setPosts] = useState<Listing[]>([]);
   const [circlePosts, setCirclePosts] = useState<CirclePost[]>([]);
@@ -37,7 +38,18 @@ export default function SearchPage({
   const [history, setHistory] = useState<string[]>(loadHistory);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // ── 服务端搜索（300ms 防抖）──
+  // ── 保存搜索历史（去重，保持最近10条）──
+  const saveToHistory = useCallback((term: string) => {
+    const trimmed = term.trim();
+    if (!trimmed) return;
+    setHistory((prev) => {
+      const next = [trimmed, ...prev.filter((t) => t !== trimmed)].slice(0, 10);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  // ── 服务端搜索（300ms 防抖，不写入历史）──
   const doSearch = useCallback(async (keyword: string) => {
     if (!keyword.trim()) {
       setPosts([]);
@@ -51,52 +63,53 @@ export default function SearchPage({
         circlesApi.trending({ keyword, page: 1, size: 30 }) as any,
       ]);
 
-      // 写入搜索历史（去重，保持最近10条）
-      const trimmed = keyword.trim();
-      setHistory((prev) => {
-        const next = [trimmed, ...prev.filter((t) => t !== trimmed)].slice(0, 10);
-        saveHistory(next);
-        return next;
-      });
-
       if (postsRes.code === 0 && postsRes.data?.list) {
-        setPosts(postsRes.data.list.map((p: any) => ({
-          id: String(p.id),
-          title: p.title,
-          price: p.price,
-          description: p.description,
-          imageUrls: safeParseJsonArray(p.image_urls),
-          category: p.category,
-          postType: p.post_type,
-          publisherId: p.user_id || 0,
-          publisherName: p.publisher_name || p.nickname || '',
-          publisherAvatar: p.publisher_avatar || '',
-          publisherGender: p.publisher_gender || null,
-          isVerifiedStudent: p.publisher_auth_status === 'verified',
-          isOfficialOrg: p.is_official,
-          orgName: p.org_name || p.publisher_org_name,
-          department: p.publisher_department,
-          publisherOrgLevel: p.publisher_org_level,
-          publisherPosition: p.publisher_position,
-          publishedTimeText: p.created_at?.substring(0, 10) || '',
-          views: p.views || 0,
-          favorites: 0,
-          contactInfo: p.contact_info,
-          status: p.status || 'active',
-        } as Listing)));
+        setPosts(
+          postsRes.data.list.map(
+            (p: any) =>
+              ({
+                id: String(p.id),
+                title: p.title,
+                price: p.price,
+                description: p.description,
+                imageUrls: safeParseJsonArray(p.image_urls),
+                category: p.category,
+                postType: p.post_type,
+                publisherId: p.user_id || 0,
+                publisherName: p.publisher_name || p.nickname || '',
+                publisherAvatar: p.publisher_avatar || '',
+                publisherGender: p.publisher_gender || null,
+                isVerifiedStudent: p.publisher_auth_status === 'verified',
+                isOfficialOrg: p.is_official,
+                orgName: p.org_name || p.publisher_org_name,
+                department: p.publisher_department,
+                publisherOrgLevel: p.publisher_org_level,
+                publisherPosition: p.publisher_position,
+                publishedTimeText: p.created_at?.substring(0, 10) || '',
+                views: p.views || 0,
+                favorites: 0,
+                contactInfo: p.contact_info,
+                status: p.status || 'active',
+              }) as Listing,
+          ),
+        );
       } else setPosts([]);
 
       if (circlesRes.code === 0 && circlesRes.data?.list) {
         setCirclePosts(circlesRes.data.list);
       } else setCirclePosts([]);
-    } catch { /* 静默 */ }
+    } catch {
+      /* 静默 */
+    }
     setSearching(false);
   }, []);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => doSearch(query), 300);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [query, doSearch]);
 
   const totalResults = posts.length + circlePosts.length;
@@ -128,6 +141,15 @@ export default function SearchPage({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const val = query.trim();
+                if (val) {
+                  saveToHistory(val);
+                  doSearch(val);
+                }
+              }
+            }}
             placeholder="搜索信息、课程、活动..."
             className="w-full bg-slate-100 text-xs border-0 rounded-lg pl-9 pr-8 py-2.5 focus:ring-2 focus:ring-primary focus:outline-none"
             autoFocus
@@ -155,7 +177,10 @@ export default function SearchPage({
               </div>
               <div className="flex flex-wrap gap-2">
                 {history.map((term) => (
-                  <div key={term} className="flex items-center gap-1 bg-slate-50 border border-gray-100 rounded-full px-3 py-1.5 group">
+                  <div
+                    key={term}
+                    className="flex items-center gap-1 bg-slate-50 border border-gray-100 rounded-full px-3 py-1.5 group"
+                  >
                     <button
                       onClick={() => setQuery(term)}
                       className="text-xs text-gray-600 hover:text-primary cursor-pointer"
@@ -196,49 +221,51 @@ export default function SearchPage({
                 <p className="text-[10px] text-gray-400 font-semibold mb-2">信息广场</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                   {posts.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => onOpenDetail(item)}
-                  className="bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all cursor-pointer flex flex-col group"
-                >
-                  <div className="aspect-[4/3] w-full bg-slate-100 relative overflow-hidden">
-                    {item.imageUrls.length > 0 ? (
-                      <img
-                        src={item.imageUrls[0]}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-slate-100 text-gray-300">
-                        <Icon name="image" className="text-4xl" />
+                    <div
+                      key={item.id}
+                      onClick={() => onOpenDetail(item)}
+                      className="bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all cursor-pointer flex flex-col group"
+                    >
+                      <div className="aspect-[4/3] w-full bg-slate-100 relative overflow-hidden">
+                        {item.imageUrls.length > 0 ? (
+                          <img
+                            src={item.imageUrls[0]}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-slate-100 text-gray-300">
+                            <Icon name="image" className="text-4xl" />
+                          </div>
+                        )}
+                        <div className="absolute top-2 left-2">
+                          <span className="bg-black/50 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            {postTypeLabel(item.postType)}
+                          </span>
+                        </div>
                       </div>
-                    )}
-                    <div className="absolute top-2 left-2">
-                      <span className="bg-black/50 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        {postTypeLabel(item.postType)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="p-3">
-                    <h3 className="font-headline font-semibold text-xs text-on-surface line-clamp-2 mb-1">
-                      {item.title}
-                    </h3>
-                    <div className="flex justify-between items-center">
-                      {item.postType === 'sell' && item.price ? (
-                        <span className="text-xs font-bold text-course-red">¥ {item.price}</span>
-                      ) : (
-                        <span className="text-[10px] text-gray-400">{item.publishedTimeText}</span>
-                      )}
-                      <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                        <Icon name="visibility" className="text-[10px]" />
-                        {item.views}
-                        {savedListingIds.includes(item.id) && <Icon name="favorite" className="text-[10px] ml-1 text-course-red" />}
+                      <div className="p-3">
+                        <h3 className="font-headline font-semibold text-xs text-on-surface line-clamp-2 mb-1">
+                          {item.title}
+                        </h3>
+                        <div className="flex justify-between items-center">
+                          {item.postType === 'sell' && item.price ? (
+                            <span className="text-xs font-bold text-course-red">¥ {item.price}</span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">{item.publishedTimeText}</span>
+                          )}
+                          <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                            <Icon name="visibility" className="text-[10px]" />
+                            {item.views}
+                            {savedListingIds.includes(item.id) && (
+                              <Icon name="favorite" className="text-[10px] ml-1 text-course-red" />
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  ))}
                 </div>
               </>
             )}
@@ -249,7 +276,9 @@ export default function SearchPage({
                   {circlePosts.map((p) => (
                     <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-3">
                       <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-[10px] font-semibold text-gray-500">{p.is_anonymous ? '匿名同学' : p.nickname}</span>
+                        <span className="text-[10px] font-semibold text-gray-500">
+                          {p.is_anonymous ? '匿名同学' : p.nickname}
+                        </span>
                         <span className="text-[10px] text-gray-300">{p.created_at?.substring(0, 10)}</span>
                       </div>
                       <p className="text-xs text-on-surface line-clamp-2">{p.content}</p>

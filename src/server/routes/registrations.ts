@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response } from 'express';
 /**
  * 报名路由
  */
@@ -19,10 +19,9 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
 
       // 幂等检查：同一 idempotencyKey 拒绝重复提交
       if (input.idempotencyKey) {
-        const [existing]: any = await pool.query(
-          'SELECT id FROM registrations WHERE idempotency_key = ?',
-          [input.idempotencyKey],
-        );
+        const [existing]: any = await pool.query('SELECT id FROM registrations WHERE idempotency_key = ?', [
+          input.idempotencyKey,
+        ]);
         if (existing.length > 0) return ok(res, null, '报名成功');
       }
 
@@ -46,17 +45,18 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
         const [postRows]: any = await pool.query('SELECT user_id, title FROM posts WHERE id = ?', [input.listingId]);
         if (postRows.length > 0 && postRows[0].user_id && postRows[0].user_id !== req.userId) {
           const registrantName = input.registrantName || '匿名用户';
-          await pool.query(
-            "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'registration')",
-            [
-              postRows[0].user_id,
-              '活动新报名',
-              `${registrantName} 报名了你的活动「${postRows[0].title || input.listingTitle}」`,
-            ],
-          );
+          await pool.query("INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'registration')", [
+            postRows[0].user_id,
+            '活动新报名',
+            `${registrantName} 报名了你的活动「${postRows[0].title || input.listingTitle}」`,
+          ]);
         }
       } catch (noticeErr: any) {
-        logger.warn('报名通知写入失败', { error: noticeErr.message, listing_id: input.listingId, trace_id: req._traceId });
+        logger.warn('报名通知写入失败', {
+          error: noticeErr.message,
+          listing_id: input.listingId,
+          trace_id: req._traceId,
+        });
       }
 
       logger.business('活动报名', {
@@ -67,7 +67,7 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
       });
       ok(res, null, '报名成功');
     } catch (err: any) {
-      logger.error('报名失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
+      logger.error('报名失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '报名失败');
     }
   });
@@ -86,13 +86,13 @@ export function registerRegistrationRoutes(app: any, pool: Pool) {
       // 解密敏感字段
       const decryptRow = (r: any) => ({
         ...r,
-        registrant_name: decrypt(r.registrant_name) || r.registrant_name,
-        student_id: decrypt(r.student_id) || r.student_id,
-        phone: decrypt(r.phone) || r.phone,
+        registrant_name: decrypt(r.registrant_name) ?? null,
+        student_id: decrypt(r.student_id) ?? null,
+        phone: decrypt(r.phone) ?? null,
       });
       ok(res, { joined: joined.map(decryptRow), mine: mine.map(decryptRow) });
     } catch (err: any) {
-      logger.error('获取报名失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
+      logger.error('获取报名失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '获取报名数据失败');
     }
   });

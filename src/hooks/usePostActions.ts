@@ -15,8 +15,14 @@ interface PostDataLayer {
   setActiveTab: React.Dispatch<React.SetStateAction<string>>;
   setEditingListing: React.Dispatch<React.SetStateAction<Listing | null>>;
   setCarouselIndex: React.Dispatch<React.SetStateAction<number>>;
-  profile: { fullName: string; avatarUrl: string; isVerified: boolean; department?: string; gender: 'male' | 'female' | null; genderVisible: boolean };
-  reportedPostIds: React.MutableRefObject<Set<string>>;
+  profile: {
+    fullName: string;
+    avatarUrl: string;
+    isVerified: boolean;
+    department?: string;
+    gender: 'male' | 'female' | null;
+    genderVisible: boolean;
+  };
   lastPublishTime: React.MutableRefObject<number>;
   editingListing: Listing | null;
   PUBLISH_COOLDOWN: number;
@@ -53,65 +59,21 @@ export function usePostActions(d: PostDataLayer) {
   };
 
   const handleDelete = (listingId: string) => {
-    runDelete(
-      d.setListings,
-      listingId,
-      () => postsApi.delete(listingId),
-      {
-        onSuccess: () => d.showToast('已删除', 'info'),
-        onError: () => d.showToast('删除失败，请重试', 'info'),
-      },
-    );
+    runDelete(d.setListings, listingId, () => postsApi.delete(listingId), {
+      onSuccess: () => d.showToast('已删除', 'info'),
+      onError: () => d.showToast('删除失败，请重试', 'info'),
+    });
   };
 
   const handleCopyContact = (contactInfo: string) => {
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(contactInfo).then(
         () => d.showToast('联系方式已复制', 'success'),
-        () => d.showToast('复制失败，请手动复制', 'info')
+        () => d.showToast('复制失败，请手动复制', 'info'),
       );
     } else {
       d.showToast('复制失败，请手动复制', 'info');
     }
-  };
-
-  const handleReport = (listingId: string, reason: string) => {
-    const target = d.listings.find((l) => l.id === listingId);
-    if (!target || target.status !== 'active') {
-      d.showToast('该帖子无法举报', 'info');
-      return;
-    }
-    // 仅允许数字ID
-    if (!/^\d+$/.test(listingId)) {
-      d.showToast('该帖子无法举报', 'info');
-      return;
-    }
-    if (d.reportedPostIds.current.has(listingId)) {
-      d.showToast('您已举报过该帖子', 'info');
-      return;
-    }
-    postsApi.report(listingId, reason).then((res) => {
-      if (res.code === 0) {
-        d.reportedPostIds.current.add(listingId);
-        d.setMessages((prev: Message[]) => [
-          {
-            id: `msg-${Date.now()}`,
-            title: '举报已提交',
-            content: `您举报的帖子已提交。举报原因：${reason}。管理员将尽快处理。`,
-            timeText: '刚刚',
-            category: 'approval',
-            status: 'update',
-            isRead: false,
-          },
-          ...prev,
-        ]);
-        d.showToast('举报已提交', 'info');
-      } else {
-        d.showToast(res.message || '举报失败，请重试', 'info');
-      }
-    }).catch(() => {
-      d.showToast('举报失败，请重试', 'info');
-    });
   };
 
   const handleStartEdit = (listing: Listing) => {
@@ -166,7 +128,8 @@ export function usePostActions(d: PostDataLayer) {
       d.showToast(msg || '发布失败，请重试', 'info');
     };
 
-    postsApi.create({
+    postsApi
+      .create({
         title: full.title,
         description: full.description,
         price: full.price,
@@ -180,9 +143,7 @@ export function usePostActions(d: PostDataLayer) {
         const data = res.data as { id: number } | undefined;
         if (res.code === 0 && data?.id) {
           const serverId = String(data.id);
-          d.setListings((prev: Listing[]) =>
-            prev.map((l) => (l.id === listingId ? { ...l, id: serverId } : l)),
-          );
+          d.setListings((prev: Listing[]) => prev.map((l) => (l.id === listingId ? { ...l, id: serverId } : l)));
           const reviewMsg: Message = {
             id: `msg-${Date.now()}`,
             title: '发布提交审核',
@@ -217,7 +178,6 @@ export function usePostActions(d: PostDataLayer) {
     openListingDetails,
     handleDelete,
     handleCopyContact,
-    handleReport,
     handleStartEdit,
     handlePublish,
   };

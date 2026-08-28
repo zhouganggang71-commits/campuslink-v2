@@ -6,17 +6,12 @@
  * v1（旧格式兼容）：密钥直接用 UTF-8 字节（仅保留用于解密已有数据）
  */
 import crypto from 'crypto';
+import { env } from './envSchema';
 
 const ALGO = 'aes-256-gcm';
 
-function requireEnv(name: string): string {
-  const val = process.env[name];
-  if (!val) throw new Error(`缺少必需环境变量: ${name}`);
-  return val;
-}
-
 // ── 密钥派生 ──
-const rawHex = requireEnv('ENCRYPTION_KEY');
+const rawHex = env.ENCRYPTION_KEY;
 // v1 旧密钥（仅用于解密已有数据，保留向后兼容）
 const KEY_V1 = Buffer.from(rawHex, 'utf8').subarray(0, 32);
 // v2 新密钥：hex 解码后 SHA-256 → 正确利用 128 位熵生成 256 位密钥
@@ -57,7 +52,7 @@ export function decrypt(ciphertext: string): string | null {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
   } catch {
-    return ciphertext; // 解密失败返回原文（兼容旧数据）
+    return null; // 解密失败返回 null，调用方自行处理
   }
 }
 
@@ -69,6 +64,6 @@ export function reEncrypt(ciphertext: string): string | null {
   if (!ciphertext) return null;
   if (ciphertext.startsWith(FORMAT_PREFIX)) return ciphertext;
   const decrypted = decrypt(ciphertext);
-  if (!decrypted || decrypted === ciphertext) return ciphertext; // 解密失败保留原样
+  if (!decrypted) return ciphertext; // 解密失败保留原样
   return encrypt(decrypted);
 }

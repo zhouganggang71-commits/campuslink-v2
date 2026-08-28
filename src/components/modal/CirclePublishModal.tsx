@@ -53,8 +53,8 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
       let imageUrls: string[] = [];
       if (imageFiles.length > 0) {
         const form = new FormData();
-        imageFiles.forEach((f) => form.append('images', f));
-        const uploadRes = await uploadApi.uploadImage(form) as any;
+        imageFiles.forEach((f) => form.append('file', f));
+        const uploadRes = (await uploadApi.uploadImage(form)) as any;
         if (uploadRes.code === 0 && uploadRes.data?.urls) {
           imageUrls = uploadRes.data.urls;
         } else {
@@ -90,7 +90,12 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
   return (
     <Modal
       isOpen={isOpen}
-      onClose={() => { onClose(); imagePreviews.forEach((u) => URL.revokeObjectURL(u)); setImageFiles([]); setImagePreviews([]); }}
+      onClose={() => {
+        onClose();
+        imagePreviews.forEach((u) => URL.revokeObjectURL(u));
+        setImageFiles([]);
+        setImagePreviews([]);
+      }}
       title="发布到校园圈"
       subtitle="分享校园生活，连接更多同学"
       footer={
@@ -98,13 +103,7 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
           <Button variant="secondary" size="sm" block onClick={onClose}>
             取消
           </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            block
-            onClick={handleSubmit}
-            disabled={!content.trim() || loading}
-          >
+          <Button variant="primary" size="sm" block onClick={handleSubmit} disabled={!content.trim() || loading}>
             {loading ? '发布中...' : '发布'}
           </Button>
         </div>
@@ -166,7 +165,14 @@ export default function CirclePublishModal({ isOpen, circles, onClose, onSuccess
               </button>
             )}
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleSelectImages} className="hidden" />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleSelectImages}
+            className="hidden"
+          />
         </div>
 
         {/* 匿名开关 */}

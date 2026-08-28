@@ -2,7 +2,6 @@ import Icon from '../ui/Icon';
 interface BottomNavProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  unreadCount: number;
   setSelectedListing: (listing: null) => void;
 }
 
@@ -11,15 +10,17 @@ const TABS = [
   { key: 'circles', icon: 'group', label: '校园圈' },
   { key: 'publish', icon: 'add', label: '发布', special: true },
   { key: 'schedule', icon: 'calendar_month', label: '课表' },
-  { key: 'messages', icon: 'chat', label: '消息' },
+  { key: 'profile', icon: 'person', label: '我的' },
 ];
 
-export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSelectedListing }: BottomNavProps) {
+export default function BottomNav({ activeTab, setActiveTab, setSelectedListing }: BottomNavProps) {
   return (
-    <nav className="fixed bottom-0 left-0 w-full z-40 bg-white/90 backdrop-blur-md border-t border-outline-variant/70 shadow-[0px_-4px_16px_rgba(23,27,36,0.05)] py-1.5 pb-safe flex justify-around items-center max-w-lg mx-auto right-0">
+    <nav
+      aria-label="主导航"
+      className="fixed bottom-0 left-0 w-full z-40 bg-white/90 backdrop-blur-md border-t border-outline-variant/70 shadow-[0px_-4px_16px_rgba(23,27,36,0.05)] py-1.5 pb-safe flex justify-around items-center max-w-lg mx-auto right-0"
+    >
       {TABS.map((item) => {
         const isSelected = activeTab === item.key;
-        const badge = item.key === 'messages' ? unreadCount : 0;
 
         if (item.special) {
           return (
@@ -51,11 +52,6 @@ export default function BottomNav({ activeTab, setActiveTab, unreadCount, setSel
           >
             <div className="relative">
               <Icon name={item.icon} className="text-xl" />
-              {badge > 0 && (
-                <span className="absolute -top-1 -right-1.5 min-w-4 h-4 px-0.5 bg-course-red text-white text-[9px] font-bold rounded-full flex items-center justify-center border border-white">
-                  {badge}
-                </span>
-              )}
             </div>
             <span className="text-[9px] font-medium">{item.label}</span>
           </button>

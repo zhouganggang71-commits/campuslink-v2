@@ -30,12 +30,16 @@ echo "=== 2/6 上传 ==="
 ssh "$N100" "rm -rf $DIR/assets && mkdir -p $DIR/assets"
 scp dist/assets/* "$N100:$DIR/assets/"
 scp dist/index.html dist/server.cjs dist/admin.html dist/disclaimer.html dist/logo.png "$N100:$DIR/"
-# 上传 PWA 文件（manifest + service worker + 图标）
-scp dist/sw.js dist/registerSW.js dist/workbox-*.js dist/manifest.webmanifest dist/pwa-*.png "$N100:$DIR/" 2>/dev/null
+# 上传 PWA 文件（manifest + 手写 service worker + 图标）
+# ⚠️ 别加 registerSW.js/workbox-*.js——我们不是 vite-plugin-pwa 生成的 SW，这些文件不存在，
+# scp 报错非零退出会被 set -e 直接杀掉整个脚本（2026-07-04 真实翻车过一次，卡死在 2/6）
+scp dist/sw.js dist/manifest.webmanifest dist/pwa-192x192.png dist/pwa-512x512.png "$N100:$DIR/"
 # 同步 package 文件（依赖变了自动装）
 scp package.json package-lock.json "$N100:$APP/"
 # 同步 .env（仅首次）
 ssh "$N100" "test -f $APP/.env" 2>/dev/null || scp .env "$N100:$APP/"
+# VAPID 密钥（Web Push）：远程 .env 缺就从本地补三行，幂等
+ssh "$N100" "grep -q VAPID_PUBLIC_KEY $APP/.env" 2>/dev/null || grep '^VAPID_' .env | ssh "$N100" "cat >> $APP/.env"
   ssh "$N100" "mkdir -p $APP/migrations" && scp migrations/*.sql "$N100:$APP/migrations/"
 # 同步 OCR 脚本
   ssh "$N100" "mkdir -p $APP/scripts" && scp scripts/ocr_schedule.py "$N100:$APP/scripts/"
@@ -84,7 +88,7 @@ ssh "$N100" "
 echo "=== 6/6 验证 ==="
 HEALTH=$(ssh "$N100" "curl -s http://localhost:3002/api/health")
 echo "  本地: $HEALTH"
-PAGE=$(curl -sk -o /dev/null -w '%{http_code}' https://8.156.64.189:8443/campus/)
+PAGE=$(curl -sk -o /dev/null -w '%{http_code}' https://jhcaishui.cn/campus/)
 echo "  公网: HTTP $PAGE"
 
 if [ "$PAGE" = "200" ]; then

@@ -19,14 +19,28 @@ export function registerNoticeRoutes(app: any, pool: Pool) {
   // ── 获取我的消息列表 ──
   app.get('/api/v1/notices', auth, async (req: Request, res: Response) => {
     try {
-      const [rows]: any = await pool.query(
-        `SELECT id, title, content, category, is_read, created_at
-         FROM notices
-         WHERE user_id = ?
-         ORDER BY created_at DESC
-         LIMIT 100`,
-        [req.userId],
-      );
+      let rows: any;
+      try {
+        [rows] = await pool.query(
+          `SELECT id, title, content, category, is_read, created_at, target_type, target_id
+           FROM notices
+           WHERE user_id = ?
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [req.userId],
+        );
+      } catch (err: any) {
+        // 迁移040（target_type/target_id）未执行时降级，不影响其余通知类型正常展示
+        if (err?.errno !== 1054 && err?.code !== 'ER_BAD_FIELD_ERROR') throw err;
+        [rows] = await pool.query(
+          `SELECT id, title, content, category, is_read, created_at
+           FROM notices
+           WHERE user_id = ?
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [req.userId],
+        );
+      }
       ok(res, rows);
     } catch (err: any) {
       if (isSchemaError(err)) {
@@ -41,10 +55,10 @@ export function registerNoticeRoutes(app: any, pool: Pool) {
   // ── 单条已读 ──
   app.put('/api/v1/notices/:id/read', auth, limiter(30), async (req: Request, res: Response) => {
     try {
-      const [result]: any = await pool.query(
-        'UPDATE notices SET is_read = TRUE WHERE id = ? AND user_id = ?',
-        [req.params.id, req.userId],
-      );
+      const [result]: any = await pool.query('UPDATE notices SET is_read = TRUE WHERE id = ? AND user_id = ?', [
+        req.params.id,
+        req.userId,
+      ]);
       if (result.affectedRows === 0) {
         return fail(res, 404, '消息不存在或不属于你');
       }
@@ -59,10 +73,7 @@ export function registerNoticeRoutes(app: any, pool: Pool) {
   // ── 全部已读 ──
   app.put('/api/v1/notices/read-all', auth, limiter(10), async (req: Request, res: Response) => {
     try {
-      await pool.query(
-        'UPDATE notices SET is_read = TRUE WHERE user_id = ? AND is_read = FALSE',
-        [req.userId],
-      );
+      await pool.query('UPDATE notices SET is_read = TRUE WHERE user_id = ? AND is_read = FALSE', [req.userId]);
       ok(res, null);
     } catch (err: any) {
       if (isSchemaError(err)) return ok(res, null);
@@ -74,10 +85,10 @@ export function registerNoticeRoutes(app: any, pool: Pool) {
   // ── 单条删除 ──
   app.delete('/api/v1/notices/:id', auth, limiter(30), async (req: Request, res: Response) => {
     try {
-      const [result]: any = await pool.query(
-        'DELETE FROM notices WHERE id = ? AND user_id = ?',
-        [req.params.id, req.userId],
-      );
+      const [result]: any = await pool.query('DELETE FROM notices WHERE id = ? AND user_id = ?', [
+        req.params.id,
+        req.userId,
+      ]);
       if (result.affectedRows === 0) {
         return fail(res, 404, '消息不存在或不属于你');
       }

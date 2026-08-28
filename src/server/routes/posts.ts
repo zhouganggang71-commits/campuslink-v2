@@ -18,21 +18,26 @@ import { encrypt, decrypt } from '../crypto';
  */
 function decryptPost(p: any, req?: Request) {
   const canSeeContact = !!req && (req.isVerified || req.isAdmin || (req.userId != null && req.userId === p.user_id));
-  return { ...p, contact_info: canSeeContact ? (decrypt(p.contact_info) || p.contact_info) : null };
+  return { ...p, contact_info: canSeeContact ? (decrypt(p.contact_info) ?? null) : null };
 }
 
 export function registerPostRoutes(app: any, pool: Pool) {
   // 每6小时自动回收超过7天的帖子
-  setInterval(async () => {
-    try {
-      const [result]: any = await pool.query(
-        "UPDATE posts SET status = 'closed' WHERE status = 'active' AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)"
-      );
-      if (result.affectedRows > 0) {
-        logger.business('帖子自动回收', { count: result.affectedRows });
+  setInterval(
+    async () => {
+      try {
+        const [result]: any = await pool.query(
+          "UPDATE posts SET status = 'closed' WHERE status = 'active' AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)",
+        );
+        if (result.affectedRows > 0) {
+          logger.business('帖子自动回收', { count: result.affectedRows });
+        }
+      } catch {
+        /* 静默 */
       }
-    } catch { /* 静默 */ }
-  }, 6 * 60 * 60 * 1000);
+    },
+    6 * 60 * 60 * 1000,
+  );
 
   // 列表
   app.get('/api/v1/posts', optionalAuth, async (req: Request, res: Response) => {
@@ -48,9 +53,12 @@ export function registerPostRoutes(app: any, pool: Pool) {
       // 查看特定用户帖子：本人/管理员可见全部状态（我的发布页需要 closed/sold），
       // 其他人只能看 active/sold，不泄露 pending/rejected/closed 内容
       const isOwner = userId > 0 && (req.userId === userId || req.isAdmin);
-      let where = userId > 0
-        ? (isOwner ? 'WHERE p.user_id = ?' : "WHERE p.user_id = ? AND p.status IN ('active','sold')")
-        : "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+      let where =
+        userId > 0
+          ? isOwner
+            ? 'WHERE p.user_id = ?'
+            : "WHERE p.user_id = ? AND p.status IN ('active','sold')"
+          : "WHERE p.status = 'active' AND p.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
       const params: any[] = [];
       if (userId > 0) {
         params.push(userId);
@@ -62,7 +70,11 @@ export function registerPostRoutes(app: any, pool: Pool) {
       if (keyword) {
         // ngram parser 适配：中文用短语搜索 +"词"（bigram 分词下 +词* 前缀语义不成立），
         // 英文/数字保留前缀通配 +word*，单个中文字符（< ngram_token_size=2）退化为 LIKE
-        const terms = keyword.slice(0, 100).replace(/[+\-*()~<>"@]/g, ' ').split(/\s+/).filter(Boolean);
+        const terms = keyword
+          .slice(0, 100)
+          .replace(/[+\-*()~<>"@]/g, ' ')
+          .split(/\s+/)
+          .filter(Boolean);
         const hasCJK = (s: string) => /[一-鿿]/.test(s);
         const ftTerms: string[] = [];
         const likeTerms: string[] = [];
@@ -100,7 +112,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
       const [countRows]: any = await pool.query(`SELECT COUNT(*) as total FROM posts p ${where}`, params);
       ok(res, { list: rows.map((r: any) => decryptPost(r, req)), total: countRows[0].total, page, limit });
     } catch (err: any) {
-      logger.error('获取帖子列表失败', { error: err.message, trace_id: req._traceId});
+      logger.error('获取帖子列表失败', { error: err.message, trace_id: req._traceId });
       fail(res, 500, '获取帖子列表失败');
     }
   });
@@ -128,7 +140,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
       post.views += 1;
       ok(res, decryptPost(post, req));
     } catch (err: any) {
-      logger.error('获取帖子详情失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId});
+      logger.error('获取帖子详情失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId });
       fail(res, 500, '获取帖子详情失败');
     }
   });
@@ -159,7 +171,12 @@ export function registerPostRoutes(app: any, pool: Pool) {
         [req.userId],
       );
       if (todayRows[0].cnt >= maxPerDay) {
-        logger.security('帖子发布超限', { user_id: req.userId, count: todayRows[0].cnt, limit: maxPerDay, trace_id: req._traceId });
+        logger.security('帖子发布超限', {
+          user_id: req.userId,
+          count: todayRows[0].cnt,
+          limit: maxPerDay,
+          trace_id: req._traceId,
+        });
         return fail(res, 429, `今日发布已达上限（${maxPerDay}条）`, ErrorCode.DAILY_LIMIT_EXCEEDED);
       }
 
@@ -170,7 +187,11 @@ export function registerPostRoutes(app: any, pool: Pool) {
         [req.userId, titleHash],
       );
       if (dupRows.length > 0) {
-        logger.security('帖子重复发布', { user_id: req.userId, title: input.title.slice(0, 40), trace_id: req._traceId });
+        logger.security('帖子重复发布', {
+          user_id: req.userId,
+          title: input.title.slice(0, 40),
+          trace_id: req._traceId,
+        });
         return fail(res, 409, '您今天已发布过相同内容的帖子', ErrorCode.DUPLICATE_SUBMISSION);
       }
 
@@ -199,7 +220,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
       });
       ok(res, { id: result.insertId });
     } catch (err: any) {
-      logger.error('发布失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
+      logger.error('发布失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '发布失败');
     }
   });
@@ -216,7 +237,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
       logger.business('帖子关闭', { post_id: req.params.id, user_id: req.userId, trace_id: req._traceId });
       ok(res, null, '已关闭');
     } catch (err: any) {
-      logger.error('关闭帖子失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId});
+      logger.error('关闭帖子失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId });
       fail(res, 500, '关闭失败');
     }
   });
@@ -233,51 +254,13 @@ export function registerPostRoutes(app: any, pool: Pool) {
       logger.business('帖子售出', { post_id: req.params.id, user_id: req.userId, trace_id: req._traceId });
       ok(res, null, '已标记为已售');
     } catch (err: any) {
-      logger.error('标记已售失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId});
+      logger.error('标记已售失败', { error: err.message, post_id: req.params.id, trace_id: req._traceId });
       fail(res, 500, '标记失败');
     }
   });
 
   // ── 举报帖子 ──
-  app.post('/api/v1/posts/:id/report', auth, limiter(5), async (req: Request, res: Response) => {
-    try {
-      if (!req.isVerified) return fail(res, 403, '账号待审核，审核通过后才能举报');
-      const { reason } = req.body || {};
-      const reasonStr = (typeof reason === 'string' ? reason.trim() : '').slice(0, 200);
-      if (!reasonStr) return fail(res, 400, '请填写举报原因');
-
-      const postId = String(req.params.id);
-      const [rows]: any = await pool.query('SELECT id, title, user_id, status FROM posts WHERE id = ?', [postId]);
-      if (rows.length === 0) return notFound(res, '帖子不存在');
-      if (rows[0].status !== 'active') return fail(res, 400, '该帖子无法举报');
-
-      // 同一用户同帖24小时内不可重复举报
-      const [dupRows]: any = await pool.query(
-        'SELECT id FROM feedbacks WHERE user_id = ? AND content LIKE ? AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)',
-        [req.userId, `%[post:${postId}]%`],
-      );
-      if (dupRows.length > 0) return fail(res, 409, '您已在24小时内举报过该帖子');
-
-      const [userRows]: any = await pool.query('SELECT nickname FROM users WHERE id = ?', [req.userId]);
-      const userName = userRows[0]?.nickname || '匿名';
-      await pool.query(
-        'INSERT INTO feedbacks (user_id, user_name, content) VALUES (?, ?, ?)',
-        [req.userId, userName, `[post:${postId}] 举报帖子「${rows[0].title}」：${reasonStr}`],
-      );
-
-      // 向管理员推送通知
-      await pool.query(
-        "INSERT INTO notices (user_id, title, content, category) VALUES (?, ?, ?, 'approval')",
-        [0, '帖子被举报', `帖子「${rows[0].title}」被用户举报，原因：${reasonStr}`],
-      ).catch(() => {});
-
-      logger.security('帖子举报', { post_id: postId, user_id: req.userId, reason: reasonStr, trace_id: req._traceId });
-      ok(res, null, '举报已提交');
-    } catch (err: any) {
-      logger.error('举报失败', { error: err.message, trace_id: req._traceId });
-      fail(res, 500, '举报失败');
-    }
-  });
+  // 帖子举报已迁移到统一的 POST /api/v1/reports（target_type=post），见 routes/reports.ts
 
   // 收藏（切换）
   app.post('/api/v1/favorites/:postId', auth, limiter(10), async (req: Request, res: Response) => {
@@ -302,7 +285,7 @@ export function registerPostRoutes(app: any, pool: Pool) {
         ok(res, { favorited: true });
       }
     } catch (err: any) {
-      logger.error('收藏操作失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
+      logger.error('收藏操作失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '收藏操作失败');
     }
   });
@@ -314,18 +297,22 @@ export function registerPostRoutes(app: any, pool: Pool) {
         'SELECT p.* FROM favorites f JOIN posts p ON f.post_id = p.id WHERE f.user_id = ? ORDER BY f.created_at DESC',
         [req.userId],
       );
-      ok(res, rows.map((r: any) => decryptPost(r, req)));
+      ok(
+        res,
+        rows.map((r: any) => decryptPost(r, req)),
+      );
     } catch (err: any) {
-      logger.error('获取收藏失败', { error: err.message, user_id: req.userId, trace_id: req._traceId});
+      logger.error('获取收藏失败', { error: err.message, user_id: req.userId, trace_id: req._traceId });
       fail(res, 500, '获取收藏失败');
     }
   });
 
+  // ── 用户公开收藏列表（他人个人主页使用）──
   // ── 分类列表 ──
   app.get('/api/v1/categories', async (req: Request, res: Response) => {
     try {
       const [rows]: any = await pool.query(
-        'SELECT id, name, parent_id, sort_order FROM categories WHERE is_active = TRUE ORDER BY sort_order'
+        'SELECT id, name, parent_id, sort_order FROM categories WHERE is_active = TRUE ORDER BY sort_order',
       );
       ok(res, rows);
     } catch (err: any) {

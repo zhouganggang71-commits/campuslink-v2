@@ -19,7 +19,7 @@ module.exports = {
       min_uptime: '10s',
       restart_delay: 3000,
       // 内存保护
-      max_memory_restart: '256M',
+      max_memory_restart: '512M',
       // 日志轮转
       error_file: './logs/pm2-error.log',
       out_file: './logs/pm2-out.log',

@@ -4,7 +4,9 @@
 import { request } from './client';
 
 export const postsApi = {
-  list(params: { page?: number; limit?: number; type?: string; keyword?: string; userId?: number; sort?: string } = {}) {
+  list(
+    params: { page?: number; limit?: number; type?: string; keyword?: string; userId?: number; sort?: string } = {},
+  ) {
     const qs = new URLSearchParams();
     if (params.page) qs.set('page', String(params.page));
     if (params.limit) qs.set('limit', String(params.limit));
@@ -20,9 +22,14 @@ export const postsApi = {
   },
 
   create(body: {
-    title: string; description: string; price?: number | null;
-    originalPrice?: number | null; category: string;
-    postType: string; imageUrls: string[]; contactInfo?: string | null;
+    title: string;
+    description: string;
+    price?: number | null;
+    originalPrice?: number | null;
+    category: string;
+    postType: string;
+    imageUrls: string[];
+    contactInfo?: string | null;
   }) {
     return request<{ id: number }>('POST', '/posts', body);
   },
@@ -33,10 +40,6 @@ export const postsApi = {
 
   markSold(postId: string) {
     return request('PUT', `/posts/${postId}/sold`);
-  },
-
-  report(postId: string, reason: string) {
-    return request('POST', `/posts/${postId}/report`, { reason });
   },
 
   // 收藏

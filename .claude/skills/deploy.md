@@ -56,7 +56,7 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 "pm2 restart campuslink --update-env && sle
 
 #### 6. 公网验证
 ```bash
-curl -s -o /dev/null -w '%{http_code}' https://jhcaishui.cn:8443/campus/api/v1/health
+curl -s -o /dev/null -w '%{http_code}' https://jhcaishui.cn/campus/api/v1/health
 ```
 
 ## 如果修改了 nginx/Apache 配置
@@ -68,7 +68,7 @@ ssh root@8.156.64.189 -i ~/.ssh/id_ed25519 "nginx -t && nginx -s reload"
 # 阿里云 Apache
 ssh root@8.156.64.189 -i ~/.ssh/id_ed25519 "systemctl reload httpd"
 # 验证
-curl -s -o /dev/null -w '%{http_code}' https://jhcaishui.cn:8443/campus/api/v1/health
+curl -s -o /dev/null -w '%{http_code}' https://jhcaishui.cn/campus/api/v1/health
 ```
 
 ## 部署后检查
@@ -87,7 +87,7 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 "tail -20 /home/ubuntu/app/campuslink/logs/
 | N100 项目 | `/home/ubuntu/app/campuslink/` |
 | PM2 进程 | `campuslink` |
 | 内网端口 | `http://192.168.1.10:3002/` |
-| 公网地址 | `https://jhcaishui.cn:8443/campus/` |
+| 公网地址 | `https://jhcaishui.cn/campus/` |
 | N100 SSH (Tailscale) | `ubuntu@100.117.221.27` |
 | N100 SSH (内网) | `ubuntu@192.168.1.10` |
 | 阿里云 SSH | `root@8.156.64.189` |

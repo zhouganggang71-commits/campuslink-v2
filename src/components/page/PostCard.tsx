@@ -51,11 +51,11 @@ function PostCardInner({ listing, postTypeLabel, onClick, isSaved, onViewProfile
               {postTypeLabel(listing.postType)}
             </span>
             {listing.isOfficialOrg && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
-                官方
-              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">官方</span>
             )}
-            {listing.price && <span className="text-course-red font-bold ml-auto shrink-0">¥{listing.price}</span>}
+            {listing.price != null && listing.price > 0 && (
+              <span className="text-course-red font-bold ml-auto shrink-0">¥{listing.price}</span>
+            )}
           </div>
           <h3 className="text-[15px] font-bold text-on-surface truncate flex items-center gap-1">
             {isSaved && <Icon name="bookmark" className="text-amber-500 text-xs shrink-0" />}
@@ -70,8 +70,11 @@ function PostCardInner({ listing, postTypeLabel, onClick, isSaved, onViewProfile
         {onViewProfile ? (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onViewProfile(); }}
-            className="flex items-center gap-1 max-w-[45%] min-w-0 hover:text-primary transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewProfile();
+            }}
+            className="flex items-center gap-1 max-w-[45%] min-w-0 hover:text-primary transition-colors leading-none"
           >
             {listing.publisherAvatar ? (
               <img
@@ -81,7 +84,9 @@ function PostCardInner({ listing, postTypeLabel, onClick, isSaved, onViewProfile
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <Icon name="person" className="text-[11px] shrink-0" />
+              <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                <Icon name="person" className="text-[10px]" />
+              </span>
             )}
             <span className="truncate">{listing.publisherName}</span>
             <GenderBadge gender={listing.publisherGender} />

@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Listing, Notice, DEPARTMENTS } from '../../types';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { Listing, Notice, Course, CourseOverride, Content, DEPARTMENTS } from '../../types';
 import { POST_TYPE_CHANNELS } from '../../data';
 import Icon from '../ui/Icon';
 import PostCard from './PostCard';
@@ -8,7 +8,14 @@ import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import { CardSkeleton } from '../ui/Skeleton';
 import ScrollToTop from '../ui/ScrollToTop';
+import HomeBanner from '../home/HomeBanner';
+import ServiceGrid from '../home/ServiceGrid';
+import NewcomerGrid from '../home/NewcomerGrid';
 import { getCategoryStyle } from '../../utils/postCategory';
+import { useUpcomingExams } from '../../hooks/useUpcomingExams';
+import { usePullToRefresh, PullIndicator } from '../../hooks/usePullToRefresh';
+import { useTodayClasses } from '../../hooks/useTodayClasses';
+import { circlesApi } from '../../api';
 
 function postTypeLabel(pt: string) {
   return POST_TYPE_CHANNELS.find((p) => p.key === pt)?.label || pt;
@@ -16,6 +23,10 @@ function postTypeLabel(pt: string) {
 interface HomeTabProps {
   listings: Listing[];
   notices: Notice[];
+  courses: Course[];
+  courseOverrides: CourseOverride[];
+  onGoSchedule: () => void;
+  onGoCircles: () => void;
   selectedPostType: string;
   setSelectedPostType: (s: string) => void;
   savedListingIds: string[];
@@ -31,11 +42,22 @@ interface HomeTabProps {
   listError?: string | null;
   onRetry?: () => void;
   onViewProfile?: (userId: number, placeholder: any) => void;
+  // 内容运营区（R12 Phase 1）
+  bannerItems: Content[];
+  contentsByCat: Record<string, Content[]>;
+  contentsLoading: boolean;
+  openContentList: (category: string, subCategory?: string) => void;
+  openContent: (c: Content) => void;
+  onOpenPeerMatch: () => void;
 }
 
 export default function HomeTab({
   listings,
   notices,
+  courses,
+  courseOverrides,
+  onGoSchedule,
+  onGoCircles,
   selectedPostType,
   setSelectedPostType,
   savedListingIds,
@@ -51,6 +73,12 @@ export default function HomeTab({
   listError,
   onRetry,
   onViewProfile,
+  bannerItems,
+  contentsByCat,
+  contentsLoading,
+  openContentList,
+  openContent,
+  onOpenPeerMatch,
 }: HomeTabProps) {
   const [selectedDept, setSelectedDept] = useState('all');
   const [showMine, setShowMine] = useState(false);
@@ -58,34 +86,38 @@ export default function HomeTab({
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasExtraFilter = showMine || selectedDept !== 'all';
 
-  // ── 下拉刷新 ──
-  const [pullDistance, setPullDistance] = useState(0);
-  const touchStartY = useRef(0);
-  const isPulling = useRef(false);
-  const PULL_THRESHOLD = 60;
+  // 个人化考试倒计时（每个用户看到自己的最近一场考试）
+  const upcomingExams = useUpcomingExams();
+  const nextExam = upcomingExams[0] || null;
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (scrollRef.current && scrollRef.current.scrollTop <= 0) {
-      touchStartY.current = e.touches[0].clientY;
-      isPulling.current = true;
-    }
+  // 第N周·今日课程（个人化，周数来自服务端 term_config 权威源）
+  const todayClasses = useTodayClasses(courses, courseOverrides);
+
+  // 圈子热帖 Top1（公开数据，全员可见）
+  const [hotPost, setHotPost] = useState<{ id: number; content: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    circlesApi
+      .trending({ page: 1, size: 1 })
+      .then((res) => {
+        if (cancelled || res.code !== 0 || !res.data?.list?.length) return;
+        const p = res.data.list[0];
+        if (p?.content) setHotPost({ id: p.id, content: String(p.content) });
+      })
+      .catch(() => {
+        /* 静默 */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isPulling.current || refreshing) return;
-    const dy = e.touches[0].clientY - touchStartY.current;
-    if (dy > 0) {
-      setPullDistance(Math.min(dy * 0.4, 80));
-    }
-  }, [refreshing]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (pullDistance >= PULL_THRESHOLD && !refreshing) {
-      onRefresh();
-    }
-    setPullDistance(0);
-    isPulling.current = false;
-  }, [pullDistance, refreshing, onRefresh]);
+  // ── 下拉刷新 ──
+  const { pullDistance, handleTouchStart, handleTouchMove, handleTouchEnd, PULL_THRESHOLD } = usePullToRefresh({
+    refreshing,
+    onRefresh,
+    scrollRef,
+  });
 
   // ── 滚动触底加载更多 ──
   useEffect(() => {
@@ -108,11 +140,12 @@ export default function HomeTab({
     () =>
       listings.filter(
         (l) =>
-          (selectedPostType === 'all' || l.postType === selectedPostType) &&
+          (selectedPostType === 'all' || selectedPostType === 'saved' || l.postType === selectedPostType) &&
           (selectedDept === 'all' || l.department === selectedDept) &&
-          (!showMine || l.publisherName === currentUserName),
+          (!showMine || l.publisherName === currentUserName) &&
+          (selectedPostType !== 'saved' || savedListingIds.includes(l.id)),
       ),
-    [listings, selectedPostType, selectedDept, showMine, currentUserName],
+    [listings, selectedPostType, selectedDept, showMine, savedListingIds, currentUserName],
   );
 
   // 初始加载骨架屏
@@ -127,16 +160,7 @@ export default function HomeTab({
       onTouchEnd={handleTouchEnd}
     >
       {/* ── 下拉刷新指示器 ── */}
-      <div
-        className="flex items-center justify-center gap-2 transition-all duration-200 overflow-hidden"
-        style={{ height: pullDistance, opacity: pullDistance / PULL_THRESHOLD }}
-      >
-        <div className={`w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full ${refreshing ? 'animate-spin' : ''}`}
-          style={{ transform: `rotate(${pullDistance * 3}deg)` }} />
-        <span className="text-[11px] text-primary/60 font-semibold">
-          {refreshing ? '刷新中...' : pullDistance >= PULL_THRESHOLD ? '松开刷新' : '下拉刷新'}
-        </span>
-      </div>
+      <PullIndicator pullDistance={pullDistance} PULL_THRESHOLD={PULL_THRESHOLD} refreshing={refreshing} />
 
       <div className="p-4 flex flex-col gap-3">
         {/* 搜索栏 */}
@@ -152,6 +176,45 @@ export default function HomeTab({
             搜索信息、课程、活动...
           </div>
         </div>
+
+        {/* 运营区（R12 Phase 1：对标竞品链千校）— Banner + 宫格 + 新生必看 */}
+        {contentsLoading && !bannerItems.length ? (
+          <div className="h-36 rounded-2xl animate-pulse bg-on-surface/5" />
+        ) : (
+          <>
+            <HomeBanner items={bannerItems} onOpen={openContent} />
+            <ServiceGrid
+              onOpenSub={(sub) => openContentList('services', sub)}
+              onOpenCategory={(category) => openContentList(category)}
+              onGoSchedule={onGoSchedule}
+            />
+            <NewcomerGrid
+              items={contentsByCat.newcomer || []}
+              onOpen={openContent}
+              onViewAll={() => openContentList('newcomer')}
+            />
+
+            {/* 校内寻伴入口（对标链千校"去匹配"，认证数据匹配） */}
+            <button
+              onClick={onOpenPeerMatch}
+              className="card-float rounded-2xl p-4 flex items-center justify-between text-left cursor-pointer active:scale-[0.98] transition-transform"
+            >
+              <div className="flex items-center gap-3">
+                <span className="w-11 h-11 rounded-2xl bg-course-magenta/10 text-course-magenta flex items-center justify-center shrink-0">
+                  <Icon name="handshake" className="text-xl" />
+                </span>
+                <div>
+                  <div className="text-sm font-semibold">点击这里找同专业朋友啦～校内寻伴</div>
+                  <div className="text-[11px] text-on-surface-variant mt-0.5">认证院系/专业匹配，拓展校园社交圈</div>
+                </div>
+              </div>
+              <span className="shrink-0 text-xs font-semibold text-primary flex items-center gap-0.5">
+                去匹配
+                <Icon name="chevron_right" className="text-sm" />
+              </span>
+            </button>
+          </>
+        )}
 
         {/* 活动海报 */}
         {activities.length > 0 && (
@@ -185,9 +248,7 @@ export default function HomeTab({
           <div className="flex flex-1 min-w-0 justify-between">
             {POST_TYPE_CHANNELS.map((ch) => {
               const isAll = ch.key === 'all';
-              const style = isAll
-                ? { text: 'text-on-surface', bg: 'bg-on-surface/8' }
-                : getCategoryStyle(ch.key);
+              const style = isAll ? { text: 'text-on-surface', bg: 'bg-on-surface/8' } : getCategoryStyle(ch.key);
               const active = selectedPostType === ch.key;
               return (
                 <button
@@ -200,7 +261,9 @@ export default function HomeTab({
                   >
                     <Icon name={ch.icon} className="text-base" />
                   </span>
-                  <span className={`text-[9px] transition-colors ${active ? `${style.text} font-semibold` : 'text-on-surface-variant/60'}`}>
+                  <span
+                    className={`text-[9px] transition-colors ${active ? `${style.text} font-semibold` : 'text-on-surface-variant/60'}`}
+                  >
                     {ch.label}
                   </span>
                 </button>
@@ -213,19 +276,12 @@ export default function HomeTab({
             className={`relative shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ml-1 ${hasExtraFilter ? 'bg-primary/10 text-primary' : 'bg-black/[0.035] text-on-surface-variant/60 hover:bg-black/[0.06]'}`}
           >
             <Icon name="tune" className="text-sm" />
-            {hasExtraFilter && (
-              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-course-red" />
-            )}
+            {hasExtraFilter && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-course-red" />}
           </button>
         </div>
 
         {/* 更多筛选 — 学院 / 我的发布，收纳进底部弹层，默认不占据首屏空间 */}
-        <Modal
-          isOpen={filterModalOpen}
-          onClose={() => setFilterModalOpen(false)}
-          position="bottom"
-          title="筛选"
-        >
+        <Modal isOpen={filterModalOpen} onClose={() => setFilterModalOpen(false)} position="bottom" title="筛选">
           <div className="flex flex-col gap-4 pb-2">
             {currentUserName && (
               <button
@@ -258,14 +314,50 @@ export default function HomeTab({
           </div>
         </Modal>
 
-        {/* 通知 */}
-        {notices.length > 0 && (
+        {/* 通知条——全部动态/个人化：①考试倒计时 ②今日课程 ③圈子热帖，外加服务端真通知 */}
+        {(notices.length > 0 || nextExam || todayClasses || hotPost) && (
           <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-            {notices.map((n) => (
-              <div
-                key={n.id}
-                className="flex items-center gap-2 bg-amber-50 rounded-xl px-3 py-2 shrink-0"
+            {nextExam && (
+              <div className="flex items-center gap-2 bg-amber-50 rounded-xl px-3 py-2 shrink-0">
+                <Icon name="timer" className="text-amber-600 text-sm shrink-0" />
+                <span className="text-[11px] text-amber-800 font-medium truncate">
+                  {nextExam.days === 0
+                    ? `「${nextExam.row.course_name}」今天开考`
+                    : `距「${nextExam.row.course_name}」考试还有 ${nextExam.days} 天`}
+                  {upcomingExams.length > 1 ? `，共 ${upcomingExams.length} 场` : ''}
+                </span>
+              </div>
+            )}
+            {todayClasses && (
+              <button
+                onClick={onGoSchedule}
+                className="flex items-center gap-2 bg-sky-50 rounded-xl px-3 py-2 shrink-0 cursor-pointer"
               >
+                <Icon name="calendar_month" className="text-sky-600 text-sm shrink-0" />
+                <span className="text-[11px] text-sky-800 font-medium truncate">
+                  第 {todayClasses.week} 周 ·{' '}
+                  {todayClasses.total === 0
+                    ? '今天没课'
+                    : todayClasses.allDone
+                      ? '今天的课已上完'
+                      : todayClasses.nextText || `今天 ${todayClasses.total} 节课`}
+                </span>
+              </button>
+            )}
+            {hotPost && (
+              <button
+                onClick={onGoCircles}
+                className="flex items-center gap-2 bg-rose-50 rounded-xl px-3 py-2 shrink-0 cursor-pointer"
+              >
+                <Icon name="trending_up" className="text-rose-500 text-sm shrink-0" />
+                <span className="text-[11px] text-rose-800 font-medium truncate max-w-[220px]">
+                  圈子热帖：{hotPost.content.slice(0, 24)}
+                  {hotPost.content.length > 24 ? '…' : ''}
+                </span>
+              </button>
+            )}
+            {notices.map((n) => (
+              <div key={n.id} className="flex items-center gap-2 bg-amber-50 rounded-xl px-3 py-2 shrink-0">
                 <Icon name="megaphone" className="text-amber-600 text-sm shrink-0" />
                 <span className="text-[11px] text-amber-800 font-medium truncate">{n.title}</span>
               </div>
@@ -290,13 +382,19 @@ export default function HomeTab({
           <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant/60 gap-3">
             <Icon name="wifi_off" className="text-4xl opacity-60" />
             <p className="text-xs font-semibold text-on-surface-variant">{listError}</p>
-            {onRetry && <Button variant="primary" size="sm" onClick={onRetry}>点击重试</Button>}
+            {onRetry && (
+              <Button variant="primary" size="sm" onClick={onRetry}>
+                点击重试
+              </Button>
+            )}
           </div>
         ) : !showInitialSkeleton && filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant/60 bg-black/[0.02] rounded-2xl">
             <Icon name="inbox" className="text-4xl mb-2 opacity-60" />
             <p className="text-xs font-semibold text-on-surface-variant">暂无内容</p>
-            <Button variant="primary" size="sm" onClick={onPublishTab}>去发布</Button>
+            <Button variant="primary" size="sm" onClick={onPublishTab}>
+              去发布
+            </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -307,15 +405,20 @@ export default function HomeTab({
                 postTypeLabel={postTypeLabel}
                 onClick={() => openListingDetails(item)}
                 isSaved={savedListingIds.includes(String(item.id))}
-                onViewProfile={onViewProfile && item.publisherId > 0 ? () => onViewProfile(item.publisherId, {
-                  name: item.publisherName,
-                  avatar: item.publisherAvatar,
-                  isVerified: item.isVerifiedStudent,
-                  department: item.department,
-                  orgLevel: item.publisherOrgLevel,
-                  orgName: item.orgName,
-                  position: item.publisherPosition,
-                }) : undefined}
+                onViewProfile={
+                  onViewProfile && item.publisherId > 0
+                    ? () =>
+                        onViewProfile(item.publisherId, {
+                          name: item.publisherName,
+                          avatar: item.publisherAvatar,
+                          isVerified: item.isVerifiedStudent,
+                          department: item.department,
+                          orgLevel: item.publisherOrgLevel,
+                          orgName: item.orgName,
+                          position: item.publisherPosition,
+                        })
+                    : undefined
+                }
               />
             ))}
           </div>

@@ -17,14 +17,21 @@
   --color-outline-variant: #e7eaf0;
   --color-inactive-grey: #999999;
 
+  /* 课程配色 — 仿 Ant Design 十二色盘，饱和度拉满，贴近"超级课程表"那种热闹活泼的观感 */
   --color-course-red: #f5222d;
-  --color-course-green: #52c41a;
-  --color-course-brown: #873800;
-  --color-course-grey: #8c8c8c;
+  --color-course-volcano: #fa541c;
   --color-course-orange: #fa8c16;
-  --color-course-blue: #4a90d9;
-  --color-course-purple: #722ed1;
+  --color-course-gold: #faad14;
   --color-course-yellow: #fadb14;
+  --color-course-lime: #a0d911;
+  --color-course-green: #52c41a;
+  --color-course-cyan: #13c2c2;
+  --color-course-blue: #1890ff;
+  --color-course-indigo: #2f54eb;
+  --color-course-purple: #722ed1;
+  --color-course-magenta: #eb2f96;
+  --color-course-grey: #8c8c8c;
+  --color-course-brown: #873800;
 
   --color-brand-blue: #005ea1;
 
@@ -139,7 +146,9 @@ html {
   .card-float {
     background-color: var(--color-surface-white);
     box-shadow: var(--shadow-card);
-    transition: box-shadow 0.2s ease, transform 0.15s ease;
+    transition:
+      box-shadow 0.2s ease,
+      transform 0.15s ease;
   }
   .card-float-interactive {
     cursor: pointer;

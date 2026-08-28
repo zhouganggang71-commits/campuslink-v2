@@ -165,12 +165,18 @@ export default function AddCourseModal({ isOpen, onClose, onSubmit, form, onChan
             className="w-full bg-slate-50 border border-gray-200 rounded-lg p-2 text-xs focus:outline-none"
           >
             <option value="bg-course-blue text-white">蓝色 · 理工</option>
+            <option value="bg-course-indigo text-white">靛蓝 · 英语</option>
+            <option value="bg-course-cyan text-white">青色 · 设计</option>
             <option value="bg-course-green text-white">绿色 · 语言</option>
+            <option value="bg-course-lime text-on-surface">柠檬绿 · 通识</option>
             <option value="bg-course-yellow text-on-surface">黄色 · 实验</option>
+            <option value="bg-course-gold text-on-surface">金色 · 选修</option>
             <option value="bg-course-orange text-white">橙色 · 人文</option>
-            <option value="bg-course-purple text-white">紫色 · 计算机</option>
+            <option value="bg-course-volcano text-white">橘红 · 体育</option>
             <option value="bg-course-red text-white">红色 · 经管</option>
-            <option value="bg-course-grey text-white">灰色 · 体育/其他</option>
+            <option value="bg-course-magenta text-white">玫红 · 艺术</option>
+            <option value="bg-course-purple text-white">紫色 · 计算机</option>
+            <option value="bg-course-grey text-white">灰色 · 其他</option>
           </select>
         </div>
       </form>

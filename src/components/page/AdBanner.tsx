@@ -21,11 +21,17 @@ function isAdDismissed(): boolean {
     const dismissedAt = parseInt(raw, 10);
     // 24 小时后恢复展示
     return Date.now() - dismissedAt < 24 * 60 * 60 * 1000;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function dismissAd() {
-  try { localStorage.setItem(AD_DISMISS_KEY, String(Date.now())); } catch {}
+  try {
+    localStorage.setItem(AD_DISMISS_KEY, String(Date.now()));
+  } catch {
+    /* 忽略 */
+  }
 }
 
 export default function AdBanner() {
@@ -34,11 +40,14 @@ export default function AdBanner() {
   const [dismissed, setDismissed] = useState(isAdDismissed);
 
   useEffect(() => {
-    api.get<Ad[]>('/ads').then((res) => {
-      if (res.code === 0 && Array.isArray(res.data) && res.data.length > 0) {
-        setAds(res.data);
-      }
-    }).catch(() => {});
+    api
+      .get<Ad[]>('/ads')
+      .then((res) => {
+        if (res.code === 0 && Array.isArray(res.data) && res.data.length > 0) {
+          setAds(res.data);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleClick = useCallback((ad: Ad) => {
@@ -62,12 +71,7 @@ export default function AdBanner() {
         onClick={() => handleClick(ad)}
         className="relative w-full aspect-[3/1] rounded-xl overflow-hidden cursor-pointer bg-slate-100 group"
       >
-        <img
-          src={ad.image_url}
-          alt={ad.title}
-          className="w-full h-full object-cover"
-          loading="eager"
-        />
+        <img src={ad.image_url} alt={ad.title} className="w-full h-full object-cover" loading="eager" />
         {ad.title && (
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2">
             <span className="text-[10px] text-white font-medium">{ad.title}</span>

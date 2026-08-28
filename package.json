@@ -13,11 +13,15 @@
     "lint": "tsc --noEmit && eslint src/",
     "format": "prettier --write 'src/**/*.{ts,tsx,css}'",
     "check": "tsc --noEmit && eslint src/ && prettier --check 'src//*/*.{ts,tsx,css}'",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "husky || true"
   },
   "dependencies": {
+    "@sentry/node": "^10.64.0",
+    "@sentry/react": "^10.64.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
+    "dompurify": "^3.4.13",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
@@ -32,6 +36,7 @@
     "sharp": "^0.35.2",
     "tesseract.js": "^7.0.0",
     "vite-plugin-pwa": "^1.3.0",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -39,6 +44,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
+    "@types/dompurify": "^3.0.5",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
@@ -46,6 +52,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/supertest": "^7.2.0",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.1",

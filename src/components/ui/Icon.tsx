@@ -28,6 +28,7 @@ import {
   Handshake,
   Share2,
   Scan,
+  MessagesSquare,
   TrendingUp,
   Inbox,
   CheckCircle,
@@ -46,7 +47,6 @@ import {
   Plus,
   LayoutGrid,
   Smartphone,
-  MessagesSquare,
   PhoneCall,
   SearchX,
   HeartOff,
@@ -71,6 +71,12 @@ import {
   Ban,
   SlidersHorizontal,
   UtensilsCrossed,
+  UserPlus,
+  Flag,
+  RefreshCw,
+  Award,
+  BookOpen,
+  Download,
 } from 'lucide-react';
 import { memo } from 'react';
 
@@ -113,6 +119,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   chevron_right: ChevronRight,
   chevron_left: ChevronLeft,
   volunteer_activism: Handshake,
+  handshake: Handshake,
   share: Share,
   share_2: Share2,
   document_scanner: Scan,
@@ -162,6 +169,14 @@ const MAP: Record<string, React.ComponentType<{ className?: string; size?: numbe
   block: Ban,
   tune: SlidersHorizontal,
   restaurant: UtensilsCrossed,
+  person_add: UserPlus,
+  flag: Flag,
+  refresh: RefreshCw,
+  chat_bubble: MessageCircle,
+  question_answer: MessagesSquare,
+  award: Award,
+  book_open: BookOpen,
+  download: Download,
 };
 
 function sizeClass(cls: string): number {
@@ -180,7 +195,7 @@ const Icon = memo(function Icon({ name, className = '' }: { name: string; classN
     console.warn(`[Icon] 未注册的图标: "${name}"`);
     return <span className={className}>?</span>;
   }
-  return <Comp className={className} size={sizeClass(className)} />;
+  return <Comp className={className} size={sizeClass(className)} aria-hidden="true" />;
 });
 
 export default Icon;

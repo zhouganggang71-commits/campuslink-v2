@@ -13,6 +13,9 @@ interface ModalProps {
   position?: 'center' | 'bottom';
   /** 是否显示右上角关闭按钮，默认 true */
   showCloseButton?: boolean;
+  /** 点击遮罩层是否关闭，默认 true。像扫码登录这种"背景空白区域大、误触代价高（会
+   * 白白浪费一次服务端浏览器会话）"的场景可以关掉，强制走显式的取消/关闭按钮 */
+  closeOnBackdropClick?: boolean;
 }
 
 export default function Modal({
@@ -25,6 +28,7 @@ export default function Modal({
   size = 'md',
   position = 'center',
   showCloseButton = true,
+  closeOnBackdropClick = true,
 }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -41,25 +45,31 @@ export default function Modal({
       // Tab 焦点循环
       if (e.key === 'Tab' && modalRef.current) {
         const focusable = modalRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
         );
         if (focusable.length === 0) return;
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (e.shiftKey) {
-          if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
         } else {
-          if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
         }
       }
     };
     document.addEventListener('keydown', handleKey);
-    document.body.style.overflow = 'hidden';
+    // 不锁 body scroll——内容由弹窗自身 overflow-y-auto 管，
+    // 锁 body 在 iOS 上会让固定高度 main 容器外的内容无法触及
     // 打开时聚焦弹窗
     modalRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', handleKey);
-      document.body.style.overflow = '';
     };
   }, [isOpen]);
 
@@ -73,7 +83,7 @@ export default function Modal({
     >
       {/* 遮罩层 */}
       <div
-        onClick={onClose}
+        onClick={closeOnBackdropClick ? onClose : undefined}
         className={`absolute inset-0 bg-black/40 transition-opacity ${isCenter ? 'backdrop-blur-xs' : ''}`}
       />
 
@@ -81,9 +91,12 @@ export default function Modal({
       <div
         ref={modalRef}
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
         className={`relative bg-white shadow-2xl z-10 flex flex-col ${
-          isCenter ? 'rounded-2xl' : 'rounded-t-[20px]'
-        } ${isCenter ? (size === 'sm' ? 'w-full max-w-sm' : 'w-full max-w-md') : 'w-full max-w-lg max-h-[92vh]'}`}
+          isCenter ? 'rounded-2xl max-h-[90vh]' : 'rounded-t-[20px]'
+        } ${isCenter ? (size === 'sm' ? 'w-full max-w-sm' : 'w-full max-w-md') : 'w-full max-w-lg max-h-[95dvh]'}`}
       >
         {/* 底部弹出模式：拖拽手柄 */}
         {!isCenter && (
@@ -108,16 +121,14 @@ export default function Modal({
 
         {/* 关闭按钮（居中模式默认显示） */}
         {showCloseButton && isCenter && (
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 cursor-pointer"
-          >
+          <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 cursor-pointer">
             <Icon name="x" className="text-lg" />
           </button>
         )}
 
-        {/* 内容区 */}
-        <div className={`overflow-y-auto ${isCenter ? 'px-5 py-3' : 'px-6 py-4'}`}>{children}</div>
+        {/* 内容区 — min-h-0 必须有：flex 子元素默认 min-height:auto 不会收缩，
+            内容超高时会把卡片撑出屏幕（body 又被锁定滚动），表现为"弹窗翻不下去" */}
+        <div className={`overflow-y-auto min-h-0 ${isCenter ? 'px-5 py-3' : 'px-6 py-4'}`}>{children}</div>
 
         {/* 底部按钮区 */}
         {footer && (

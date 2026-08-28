@@ -2,15 +2,11 @@
  * JWT 工具 — 基于 jsonwebtoken 标准库
  * 替代手写 HMAC token，提供标准过期校验、算法白名单等安全特性
  */
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { env } from './envSchema';
 
-function requireEnv(name: string): string {
-  const val = process.env[name];
-  if (!val) throw new Error(`缺少必需环境变量: ${name}`);
-  return val;
-}
-
-const JWT_SECRET = requireEnv('JWT_SECRET');
+const JWT_SECRET = env.JWT_SECRET;
 const ACCESS_EXPIRY = '1h';
 const REFRESH_EXPIRY = '30d';
 
@@ -43,6 +39,10 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
   } catch {
     return null;
   }
+}
+
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
