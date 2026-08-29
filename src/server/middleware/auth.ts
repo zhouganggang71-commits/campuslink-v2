@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction } from 'express';
 /**
  * 认证中间件 + 管理员认证 + 身份审核
  */
@@ -106,41 +106,26 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
     .catch(() => next());
 }
 
-export function adminAuth(req: Request, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) {
-    logger.security('未登录访问管理接口', { path: req.originalUrl, ip: req.ip, trace_id: req._traceId });
-    return res.status(401).json({ code: -1, message: '未登录' });
-  }
+/** 管理后台 IP 白名单：本机 / 内网 / Tailscale 网段直接放行，不再需要 ADMIN_KEY */
+function isAdminAllowedIp(ip: string): boolean {
+  if (!ip) return false;
+  const clean = ip.replace(/^::ffff:/, ''); // IPv4-mapped IPv6 统一成 IPv4
+  if (clean === '127.0.0.1' || clean === '::1') return true; // 本机（含 SSH 隧道来源）
+  if (clean.startsWith('192.168.')) return true; // 内网
+  if (clean.startsWith('100.')) return true; // Tailscale CGNAT 100.64.0.0/10
+  if (clean.startsWith('10.')) return true; // 私网 A 类（备用）
+  return false;
+}
 
-  const adminKey = process.env.ADMIN_KEY;
-  if (adminKey && token === adminKey) {
-    const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
-    if (!isLocal) {
-      logger.security('ADMIN_KEY 远程访问管理接口被拒', { ip: req.ip, path: req.originalUrl, trace_id: req._traceId });
-      return res.status(403).json({ code: -1, message: 'ADMIN_KEY 仅限本机使用' });
-    }
-    logger.security('ADMIN_KEY 本机管理认证（紧急恢复）', { path: req.originalUrl, trace_id: req._traceId });
+export function adminAuth(req: Request, res: Response, next: NextFunction) {
+  // 2026-08-28 起：IP 白名单替代 ADMIN_KEY。本机（SSH 隧道）/ 内网 / Tailscale 网段直接放行，公网一律拒绝。
+  if (isAdminAllowedIp(req.ip || '')) {
+    req.userId = 0;
+    req.isAdmin = true;
     return next();
   }
-
-  const user = verifyAccessToken(token);
-  if (!user) {
-    logger.security('Token 验证失败', { path: req.originalUrl, ip: req.ip, trace_id: req._traceId });
-    return res.status(401).json({ code: -1, message: '登录已过期' });
-  }
-  if (!user.admin) {
-    logger.security('非管理员访问管理接口', {
-      path: req.originalUrl,
-      ip: req.ip,
-      user_id: user.uid,
-      trace_id: req._traceId,
-    });
-    return res.status(403).json({ code: -1, message: '无权访问，仅限管理员' });
-  }
-  req.userId = user.uid;
-  req.isAdmin = true;
-  next();
+  logger.security('管理接口公网访问被拒', { ip: req.ip, path: req.originalUrl, trace_id: req._traceId });
+  return res.status(403).json({ code: -1, message: '管理后台仅限内网访问' });
 }
 
 export function clearAuthCache(userId: number) {

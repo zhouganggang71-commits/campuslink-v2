@@ -55,9 +55,7 @@ tr:hover{background:#f8fafc}
 
 <div id="login" class="login">
   <h1>川财CampusLink 管理后台</h1>
-  <p>管理员密钥</p>
-  <input type="password" id="keyInput" placeholder="输入密钥" autofocus onkeydown="if(event.key==='Enter')login()">
-  <button onclick="login()">进入</button>
+  <p>正在验证访问来源…</p>
   <div id="loginError" class="error"></div>
 </div>
 
@@ -74,12 +72,12 @@ tr:hover{background:#f8fafc}
 
 <script>
 const API = '/campus/api/admin';
-let KEY = '';
+
 
 // ── 工具 ──
 function tid(){return'tr-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}
 function api(path,opts={}){
-  const h={'x-trace-id':tid(),Authorization:'Bearer '+KEY};
+  const h={'x-trace-id':tid()};
   if(opts.body)h['Content-Type']='application/json';
   return fetch(API+path,{...opts,headers:{...h,...(opts.headers||{})},body:opts.body||undefined}).catch(e=>({ok:false,status:0}));
 }
@@ -92,21 +90,15 @@ const TABS=['overview','posts','circles','users','courses','registrations','favo
 const TAB_LABELS={overview:'总览',posts:'帖子',circles:'校园圈',users:'用户',courses:'课表',registrations:'报名',favorites:'收藏',tokens:'令牌',reports:'举报',appeals:'举报申诉',pwa:'PWA安装',push:'推送广播',contents:'内容管理',transactions:'交易'};
 let curTab='overview';
 
-// ── 自动登录 ──
+// ── 自动进入（IP 白名单：后端判断，无需密钥）──
 (function(){
-  const k = sessionStorage.getItem('admin_key');
-  if(k){KEY=k;document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');load();}
+  api('/stats').then(r=>{
+    if(r.ok){document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');load();}
+    else{document.getElementById('loginError').textContent='访问被拒绝：管理后台仅限内网/Tailscale 访问。请先运行 scripts/admin-tunnel.sh 开隧道（或连内网），再刷新本页。';}
+  }).catch(()=>{document.getElementById('loginError').textContent='访问被拒绝：管理后台仅限内网访问。请先运行 scripts/admin-tunnel.sh 开隧道，再刷新本页。'});
 })();
 
-function login(){
-  KEY=document.getElementById('keyInput').value.trim();
-  if(!KEY)return;
-  api('/stats').then(r=>{
-    if(r.ok){sessionStorage.setItem('admin_key',KEY);document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');load()}
-    else{document.getElementById('loginError').textContent='密钥错误'}
-  }).catch(()=>{document.getElementById('loginError').textContent='密钥错误'});
-}
-function logout(){sessionStorage.removeItem('admin_key');KEY='';document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden')}
+function logout(){document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden');location.reload()}
 
 function load(){
   api('/stats').then(r=>r.json()).then(d=>{
