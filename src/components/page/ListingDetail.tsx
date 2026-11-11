@@ -54,7 +54,8 @@ export default function ListingDetail({
   useEffect(() => {
     if (!isReal || isGuest) return;
     let cancelled = false;
-    request('GET', `/api/v1/transactions/post/${listing.id}`)
+    // 注意：client.ts BASE 已是 /campus/api/v1，这里不能重复带 /api/v1 前缀（否则拼成 /api/v1/api/v1 404）
+    request('GET', `/transactions/post/${listing.id}`)
       .then((r: any) => {
         if (!cancelled && r.code === 0) setTxStatus(r.data);
       })

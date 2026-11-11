@@ -33,6 +33,7 @@ import { ok, fail } from '../response';
 import { encrypt, decrypt } from '../crypto';
 import { hashToken } from '../jwt';
 import { COURSE_COLORS } from '../../types';
+import { captureWechatQr, WECHAT_LOGIN_URL } from '../wechat-qr';
 
 /** 扫码同步课表按"课程名"分配颜色——同一门课固定同一个颜色，不会每次刷新都变；
  * 之前这里完全没设 color_class，MySQL 用列默认值兜底，导致所有课程清一色蓝 */
@@ -232,18 +233,8 @@ function genId(): string {
 /**
  * 异步获取二维码。traceId 为发起 /wechat-qr 请求的 trace_id，用于串联该请求的全链路日志
  *
- * 2026-07-06 修复"二维码经常加载出莫名其妙的图片"：根因是①截图前只盲等固定 1500ms，
- * 二维码图片实际渲染耗时受网络/school服务器状况影响，经常等不够就截到空白/加载中的占位内容；
- * ②任何异常（包括"根本没等到二维码 iframe"这种情况）都会掉进兜底分支，把当前整个页面
- * （可能是登录表单、错误页、任何东西）截图冒充二维码显示给用户——这才是"莫名其妙的图片"
- * 的真正来源，不是"没截到图"而是"截到了不该展示的图还当成二维码展示了"。
- * 修复思路：①改用 iframe 内部 networkidle 等待真实渲染完成，而不是猜一个固定时间；
- * ②截图后用文件体积做一个粗糙但有效的"空白检测"（真二维码是黑白密集像素图，体积不会
- * 小到几百字节，加载中占位图/纯色块 PNG 压缩后体积很小）；③按尝试次数重试（每次都重新
- * page.goto 刷新页面状态，而不是在同一个可能已经卡住的页面上反复截图）；④重试耗尽后
- * 明确把 session 标记成失败状态，让前端展示"获取二维码失败，请重试"，而不是继续展示
- * 一张误导用户的假二维码——这样用户不用再靠手动反复点"重新扫码"来赌运气，也就不会
- * 再动不动就撞上同 IP 限流。
+ * 使用学校当前 CAS 入口，等待 iframe 内的 img.qrcode 真正加载完成再截取图片。
+ * 不等待长轮询 networkidle，不截取整页或占位图。最多重试 3 次，失败可由前端轮询追溯。
  */
 async function doCaptureQr(sessionId: string, traceId?: string) {
   const session = sessions.get(sessionId);
@@ -254,12 +245,11 @@ async function doCaptureQr(sessionId: string, traceId?: string) {
   const { page } = session;
 
   const MAX_ATTEMPTS = 3;
-  const MIN_VALID_QR_BYTES = 1000; // 经验阈值：加载中占位图/空白截图 PNG 体积通常远小于此
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       logger.info(`doCaptureQr: 第${attempt}次尝试，导航 CAS 登录页`, { sessionId, trace_id: traceId });
-      await page.goto('http://jw.scpcfe.cn/jwglxt/xtgl/login_slogin.html', {
+      await page.goto(WECHAT_LOGIN_URL, {
         waitUntil: 'domcontentloaded',
         timeout: 20000,
       });
@@ -267,50 +257,18 @@ async function doCaptureQr(sessionId: string, traceId?: string) {
         sessionId,
         trace_id: traceId,
         attempt,
-        url: page.url().slice(0, 150),
+        url: new URL(page.url()).origin + new URL(page.url()).pathname,
       });
 
-      const qrIframe = await page.waitForSelector('iframe#qrcodeIframe', { timeout: 15000 });
-
-      // 等二维码图片真正渲染完
-      const frame = await qrIframe.contentFrame();
-      if (frame) {
-        await frame.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
-          logger.warn('doCaptureQr: iframe networkidle 等待超时，改等 img 元素', {
-            sessionId,
-            trace_id: traceId,
-            attempt,
-          });
-          // networkidle 超时通常是 iframe 内有长连接轮询，不影响二维码图加载；
-          // 改为等 img 元素出现+稳定，比固定等待更可靠
-          frame.waitForSelector('img', { timeout: 8000 }).catch(() => {
-            logger.warn('doCaptureQr: iframe 内 img 也超时，继续截图碰运气', { sessionId, trace_id: traceId, attempt });
-          });
-        });
-      } else {
-        await page.waitForTimeout(2000);
-      }
-
-      const buf = await qrIframe.screenshot();
-
-      if (buf.length < MIN_VALID_QR_BYTES) {
-        logger.warn(`doCaptureQr: 第${attempt}次截图疑似空白/占位图（体积${buf.length}字节过小）`, {
-          sessionId,
-          trace_id: traceId,
-        });
-        if (attempt < MAX_ATTEMPTS) {
-          await page.waitForTimeout(1000);
-          continue;
-        }
-        // 重试耗尽仍然疑似空白：不展示这张可疑的图，走下面统一的失败分支
-        throw new Error(`二维码截图体积异常（${buf.length}字节），可能未渲染完成`);
-      }
+      const buf = await captureWechatQr(page);
 
       session.qrImage = `data:image/png;base64,${buf.toString('base64')}`;
       session.status = 'scanning';
       logger.info('doCaptureQr: 二维码截图完成', { sessionId, trace_id: traceId, size: buf.length, attempt });
       return;
     } catch (err: any) {
+      // 取消会话后不再导航或重试，也不误报成浏览器启动失败。
+      if (session.browserReleased || page.isClosed() || sessions.get(sessionId) !== session) return;
       logger.warn(`doCaptureQr: 第${attempt}次尝试异常`, { sessionId, trace_id: traceId, error: err.message });
       if (attempt < MAX_ATTEMPTS) {
         await page.waitForTimeout(1000);
@@ -321,6 +279,7 @@ async function doCaptureQr(sessionId: string, traceId?: string) {
       logger.error('doCaptureQr: 重试耗尽，放弃并标记失败', { sessionId, trace_id: traceId, error: err.message });
       session.status = 'timeout';
       session.error = '获取二维码失败，请重试';
+      releaseSession(session);
     }
   }
 }

@@ -44,7 +44,8 @@ export default function PeerMatchPage({ myDepartment, onBack, onStartChat, showT
   const load = useCallback(() => {
     if (isGuest) return;
     setLoading(true);
-    request('GET', `/api/v1/users/peers?scope=${scope}&limit=30`)
+    // 注意：client.ts BASE 已是 /campus/api/v1，这里不能重复带 /api/v1 前缀（否则拼成 /api/v1/api/v1 404）
+    request('GET', `/users/peers?scope=${scope}&limit=30`)
       .then((r: any) => {
         if (r.code === 0 && r.data) {
           setList(r.data.list || []);

@@ -1,7 +1,7 @@
 /**
  * 成绩 / 考试安排 — 展示扫码登录时顺带同步的数据，避免学生再登录教务系统查询
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Modal from '../ui/Modal';
 import Icon from '../ui/Icon';
 import { academicApi } from '../../api';
@@ -17,6 +17,52 @@ interface GradesExamsModalProps {
 }
 
 type LoadState = 'idle' | 'loading' | 'loaded' | 'error';
+
+/** 本地缓存：成绩/考试来自教务扫码同步，数据只在本机查看。
+ *  缓存按学号分区（换账号不串数据），退出登录时由 clearStorageCache 统一清除。
+ *  作用：登录态过期/断网时弹窗仍能展示上次同步的成绩，不会被"未登录"刷掉。 */
+const CACHE_PREFIX = 'campuslink_academic_cache_v1_';
+
+interface AcademicCache {
+  savedAt: string; // ISO
+  grades: GradeRow[];
+  exams: ExamRow[];
+}
+
+function currentStudentId(): string | null {
+  try {
+    const raw = localStorage.getItem('campuslink_profile');
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    return p?.studentId || null;
+  } catch {
+    return null;
+  }
+}
+
+function loadCache(): AcademicCache | null {
+  const sid = currentStudentId();
+  if (!sid) return null;
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + sid);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    if (!Array.isArray(c?.grades) || !Array.isArray(c?.exams)) return null;
+    return c as AcademicCache;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(grades: GradeRow[], exams: ExamRow[]): void {
+  const sid = currentStudentId();
+  if (!sid) return;
+  try {
+    localStorage.setItem(CACHE_PREFIX + sid, JSON.stringify({ savedAt: new Date().toISOString(), grades, exams }));
+  } catch {
+    /* 存储满/不可用就跳过缓存，不影响在线展示 */
+  }
+}
 
 function gradeColor(grade: string | null): string {
   if (!grade) return 'text-gray-400';
@@ -75,56 +121,97 @@ function examDays(examStart: string | null): number | null {
   return Math.round((a.getTime() - b.getTime()) / 86400000);
 }
 
+/** 缓存同步时间 → "M月D日 HH:mm"（给降级提示用） */
+function fmtSyncTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function GradesExamsModal({ isOpen, onClose, onRefresh }: GradesExamsModalProps) {
   const [tab, setTab] = useState<'grades' | 'exams'>('grades');
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [exams, setExams] = useState<ExamRow[]>([]);
   const [state, setState] = useState<LoadState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [sessionExpired, setSessionExpired] = useState(false);
+  // 展示的是本地缓存（未登录/离线时降级），此时显示"上次同步"提示 + 重新扫码入口
+  const [offline, setOffline] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string>('');
+  // 镜像最新数据：网络回调里判断"是否还有东西可展示"需要读最新值，不能依赖闭包旧 state
+  const gradesRef = useRef<GradeRow[]>([]);
+  const examsRef = useRef<ExamRow[]>([]);
+  const setBoth = (g: GradeRow[], e: ExamRow[]) => {
+    gradesRef.current = g;
+    examsRef.current = e;
+    setGrades(g);
+    setExams(e);
+  };
 
-  /** 从本地数据重新加载 grades + exams */
-  const reloadLocal = () => {
+  /** 网络拉取：成功 → 更新展示 + 写缓存；失败 → 保留已有展示并标记 offline（有缓存/数据可看时不清空） */
+  const refreshFromServer = useCallback(() => {
     Promise.all([academicApi.grades(), academicApi.exams()])
       .then(([gRes, eRes]) => {
-        if (gRes.code === 0 && Array.isArray(gRes.data)) {
-          setGrades(gRes.data);
+        const gOk = gRes.code === 0 && Array.isArray(gRes.data);
+        const eOk = eRes.code === 0 && Array.isArray(eRes.data);
+        if (gOk || eOk) {
+          // 失败的接口沿用缓存/现有数据，不让半个 tab 变空
+          const nextG = gOk ? (gRes.data as GradeRow[]) : gradesRef.current;
+          const nextE = eOk ? (eRes.data as ExamRow[]) : examsRef.current;
+          setBoth(nextG, nextE);
+          setOffline(false);
+          setCachedAt('');
+          setState('loaded');
+          saveCache(nextG, nextE);
         } else {
-          // 接口返回但结构不对，不算网络异常，单独上报方便排查（不含具体成绩内容，只记结构）
+          // 网络失败或登录失效：只要有数据就保留展示（来自缓存或本次会话早先拉到的），不清空
+          if (gradesRef.current.length || examsRef.current.length) {
+            setOffline(true);
+            setState('loaded');
+          } else {
+            setState('error');
+            setErrorMsg(gRes.message || eRes.message || '加载失败，请重试');
+          }
           reportClientError('成绩接口返回异常', {
             component: 'GradesExamsModal',
             stack: `code=${gRes.code} message=${gRes.message}`,
           });
         }
-        if (eRes.code === 0 && Array.isArray(eRes.data)) {
-          setExams(eRes.data);
-        } else {
-          reportClientError('考试接口返回异常', {
-            component: 'GradesExamsModal',
-            stack: `code=${eRes.code} message=${eRes.message}`,
-          });
-        }
-        if (gRes.code !== 0 && eRes.code !== 0) {
-          setState('error');
-          setErrorMsg(gRes.message || eRes.message || '加载失败，请重试');
-        } else {
-          setState('loaded');
-        }
       })
       .catch((err: any) => {
-        setState('error');
-        setErrorMsg('网络异常，请重试');
+        // 网络异常同理：有数据就降级展示，不刷掉
+        if (gradesRef.current.length || examsRef.current.length) {
+          setOffline(true);
+          setState('loaded');
+        } else {
+          setState('error');
+          setErrorMsg('网络异常，请重试');
+        }
         reportClientError('成绩/考试加载异常', { component: 'GradesExamsModal', stack: err?.message });
       });
-  };
+  }, []);
 
-  // ── 打开弹窗时加载数据 ──
+  // ── 打开弹窗：先用本地缓存立即展示（未登录也看得到），再后台拉新 ──
   useEffect(() => {
     if (!isOpen) return;
-    setState('loading');
     setErrorMsg('');
-    reloadLocal();
+    const cache = loadCache();
+    if (cache && (cache.grades.length || cache.exams.length)) {
+      // 有缓存：立即展示上次同步的数据，避免空白/等待，再静默刷新
+      setBoth(cache.grades, cache.exams);
+      setCachedAt(cache.savedAt || '');
+      setOffline(false);
+      setState('loaded');
+      refreshFromServer();
+    } else {
+      // 无缓存（含换账号后旧缓存不属于本学号的情况）：先清空残留再走加载态，避免串号
+      setBoth([], []);
+      setCachedAt('');
+      setOffline(false);
+      setState('loading');
+      refreshFromServer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const list = tab === 'grades' ? grades : exams;
@@ -164,13 +251,13 @@ export default function GradesExamsModal({ isOpen, onClose, onRefresh }: GradesE
           )}
         </div>
 
-        {sessionExpired && (
+        {offline && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
             <Icon name="info" className="text-amber-500 text-base shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-amber-800">教务登录已过期</p>
+              <p className="text-xs font-semibold text-amber-800">当前为上次同步的数据</p>
               <p className="text-[10px] text-amber-600 mt-0.5">
-                存储的教务会话已失效，需要重新扫码登录才能继续使用一键刷新功能
+                {cachedAt ? `同步于 ${fmtSyncTime(cachedAt)}，` : ''}登录已过期或网络不可用，重新扫码可获取最新成绩
               </p>
               {onRefresh && (
                 <button
