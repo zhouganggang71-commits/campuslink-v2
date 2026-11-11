@@ -1,4 +1,4 @@
-> **开工前必读**：先读 `/Users/zhenggangzhou/Desktop/memory_backup/记忆库-核心.md`（果果的全局记忆：身份/团队/服务器/密钥/规则），再读 `/Users/zhenggangzhou/Desktop/memory_backup/记忆库-CampusLink项目.md`（本项目细节），再动手。
+> **统一入口**：先完整读取本目录 `AGENTS.md`。它定义当前路径、规则优先级和验证要求；下方内容包含历史记录，冲突时以 `AGENTS.md` 和实际代码为准。
 
 # CampusLink — 四川财经职业学院校园信息平台
 

@@ -11,7 +11,7 @@ description: CampusLink 部署到 N100 生产环境，构建→上传→备份�
 
 ### 方式一：deploy.sh（推荐）
 ```bash
-cd /Users/zhenggangzhou/campuslink-ui && bash deploy.sh
+cd /Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2 && bash deploy.sh
 ```
 脚本自动完成：构建→上传→备份加密→装依赖→重启→验证。
 
@@ -19,7 +19,7 @@ cd /Users/zhenggangzhou/campuslink-ui && bash deploy.sh
 
 #### 1. 本地构建
 ```bash
-cd /Users/zhenggangzhou/campuslink-ui
+cd /Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2
 npm run build    # vite + esbuild
 npm run check    # tsc + eslint + prettier
 ```
@@ -83,7 +83,7 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 "tail -20 /home/ubuntu/app/campuslink/logs/
 
 | 项 | 值 |
 |----|-----|
-| 本地项目 | `/Users/zhenggangzhou/campuslink-ui/` |
+| 本地项目 | `/Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2/` |
 | N100 项目 | `/home/ubuntu/app/campuslink/` |
 | PM2 进程 | `campuslink` |
 | 内网端口 | `http://192.168.1.10:3002/` |

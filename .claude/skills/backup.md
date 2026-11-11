@@ -14,29 +14,34 @@ description: 备份 CampusLink MySQL 数据库到本地，含加密和完整性�
 | 数据库 | `campuslink` |
 | 主机 | `127.0.0.1:3306`（N100 本地） |
 | 用户 | `campuslink` |
-| 密码 | `yWw6qIvI6QCsA7IRRNnF` |
-| 加密密钥 | `3fb2dd3e525a9258de7a28c9ca092da5` |
+| 密码 | 从项目 `.env` 的 `MYSQL_PASSWORD` 读取 |
+| 加密密钥 | 从本机环境变量 `BACKUP_ENCRYPTION_KEY` 读取 |
 
 ## 备份流程
 
 ### 第一步：通过 SSH 执行 mysqldump
 ```bash
 # 先试 Tailscale，不行再内网
+cd /Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2
+set -a
+source .env
+set +a
+
 SSH_HOST="ubuntu@100.117.221.27"
 # 或内网
 SSH_HOST="ubuntu@192.168.1.10"
 
-BACKUP_DIR="/Users/zhenggangzhou/campuslink-ui/backups/$(date +%Y%m%d_%H%M)"
+BACKUP_DIR="/Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2/backups/$(date +%Y%m%d_%H%M)"
 mkdir -p "$BACKUP_DIR"
 
 # 备份全库（结构+数据）
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
-  "mysqldump -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' --single-transaction --routines --triggers campuslink" \
+  "mysqldump -u campuslink -p'$MYSQL_PASSWORD' --single-transaction --routines --triggers campuslink" \
   > "$BACKUP_DIR/campuslink_full.sql"
 
 # 仅结构（无数据）
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
-  "mysqldump -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' --no-data campuslink" \
+  "mysqldump -u campuslink -p'$MYSQL_PASSWORD' --no-data campuslink" \
   > "$BACKUP_DIR/campuslink_schema.sql"
 ```
 
@@ -57,7 +62,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 import os
 
-key = bytes.fromhex('3fb2dd3e525a9258de7a28c9ca092da5')
+key = bytes.fromhex(os.environ['BACKUP_ENCRYPTION_KEY'])
 iv = os.urandom(16)
 cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
 encryptor = cipher.encryptor()
@@ -79,12 +84,12 @@ print('encrypted:', len(encrypted), 'bytes')
 ```bash
 # 用户表（含密码哈希，最敏感）
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
-  "mysqldump -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' campuslink users refresh_tokens" \
+  "mysqldump -u campuslink -p'$MYSQL_PASSWORD' campuslink users refresh_tokens" \
   > "$BACKUP_DIR/campuslink_auth.sql"
 
 # 加密字段表（注册信息含手机号）
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
-  "mysqldump -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' campuslink registrations" \
+  "mysqldump -u campuslink -p'$MYSQL_PASSWORD' campuslink registrations" \
   > "$BACKUP_DIR/campuslink_registrations.sql"
 ```
 
@@ -92,7 +97,7 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
 ```bash
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 "
   mkdir -p /home/ubuntu/app/campuslink/backups/\$(date +%Y%m%d)
-  mysqldump -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' --single-transaction campuslink \
+  mysqldump -u campuslink -p'$MYSQL_PASSWORD' --single-transaction campuslink \
     > /home/ubuntu/app/campuslink/backups/\$(date +%Y%m%d)/campuslink_full.sql
   echo 'N100 backup done'
 "
@@ -110,11 +115,11 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 "
 ### 恢复整个数据库
 ```bash
 SSH_HOST="ubuntu@100.117.221.27"
-BACKUP_FILE="/Users/zhenggangzhou/campuslink-ui/backups/YYYYMMDD_HHMM/campuslink_full.sql"
+BACKUP_FILE="/Users/zhenggangzhou/Desktop/04_CampusLink/campuslink-v2/backups/YYYYMMDD_HHMM/campuslink_full.sql"
 
 scp -i ~/.ssh/id_ed25519 "$BACKUP_FILE" "$SSH_HOST:/tmp/restore.sql"
 ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
-  "mysql -u campuslink -p'yWw6qIvI6QCsA7IRRNnF' campuslink < /tmp/restore.sql && rm /tmp/restore.sql"
+  "mysql -u campuslink -p'$MYSQL_PASSWORD' campuslink < /tmp/restore.sql && rm /tmp/restore.sql"
 ```
 
 ### 恢复加密备份
@@ -122,8 +127,9 @@ ssh "$SSH_HOST" -i ~/.ssh/id_ed25519 \
 python3 -c "
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
+import os
 
-key = bytes.fromhex('3fb2dd3e525a9258de7a28c9ca092da5')
+key = bytes.fromhex(os.environ['BACKUP_ENCRYPTION_KEY'])
 
 with open('$BACKUP_FILE.enc', 'rb') as f:
     iv = f.read(16)

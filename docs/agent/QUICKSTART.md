@@ -1,6 +1,6 @@
 # CampusLink 快速开始（新 AI 必读）
 
-> **开工前先读**：`/Users/zhenggangzhou/Desktop/memory_backup/记忆库-核心.md`（果果的全局记忆：身份/团队/服务器/密钥/规则）+ `/Users/zhenggangzhou/Desktop/memory_backup/记忆库-CampusLink项目.md`（本项目细节）
+> **开工前先读**：`/Users/zhenggangzhou/Desktop/07_AI全局与项目记忆/memory_backup/记忆库-核心.md`（果果的全局记忆：身份/团队/服务器/密钥/规则）+ `/Users/zhenggangzhou/Desktop/07_AI全局与项目记忆/memory_backup/记忆库-CampusLink项目.md`（本项目细节）
 
 ## 核心原则
 
